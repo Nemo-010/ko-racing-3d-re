@@ -1,0 +1,28 @@
+# Game archive and everything extracted from it.
+# The archive is the property of its authors; fetch it with ./setup.sh instead.
+/KORa_17_612805.jar
+/x/
+/src/
+/assets/
+/minimaps/
+/campaign.tsv
+
+# Decompiler and JDK used while reverse-engineering.
+/cfr.jar
+/cfr.log
+/jdk*/
+
+# Toolchains and build output.
+/.cargo/
+/.rustup/
+/rust/kora/target/
+
+# Prepared Rust assets (recreated by ./setup.sh).
+/rust/kora/assets/data
+/rust/kora/assets/data.*
+/rust/kora/assets/lists/
+
+# Scratch
+*.obj
+__pycache__/
+*.pyc

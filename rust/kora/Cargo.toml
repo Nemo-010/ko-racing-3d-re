@@ -1,0 +1,12 @@
+[package]
+name = "kora"
+version = "0.1.0"
+edition = "2021"
+description = "Rust reimplementation of the K.O. Racing 3D (Jollybox) racing engine"
+
+[dependencies]
+macroquad = "0.4.16"
+rapier3d = "0.35"
+
+[profile.release]
+opt-level = 2
