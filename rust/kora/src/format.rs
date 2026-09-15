@@ -153,12 +153,19 @@ impl Model {
 }
 
 /// `.tl` - class `ar`.
+///
+/// The two 4-byte flag blocks are read in this order: `solid`, then `open`.
+/// Despite the second block being easy to read as "walls", it is what the
+/// MIDlet walks the road with (`bm.b(i)` -> `ar.b(i)`, used by the `bs`
+/// flood), and on every shipped map it is the *drivable* side flag: for
+/// `s.tl` the +X/-X sides are set and the +/-Y sides clear.  The first block
+/// is only used for tile edge rendering and the minimap.
 pub struct Tile {
     pub name: String,
     pub texture: String,
     pub variant: u8,
     pub solid: [bool; 4],
-    pub walls: [bool; 4],
+    pub open_sides: [bool; 4],
 }
 
 impl Tile {
@@ -185,12 +192,12 @@ impl Tile {
         for side in solid.iter_mut() {
             *side = r.u8() != 0;
         }
-        let walls = if r.u8() != 0 {
-            let mut walls = [false; 4];
-            for side in walls.iter_mut() {
+        let open_sides = if r.u8() != 0 {
+            let mut open = [false; 4];
+            for side in open.iter_mut() {
                 *side = r.u8() != 0;
             }
-            walls
+            open
         } else {
             solid
         };
@@ -200,7 +207,7 @@ impl Tile {
             texture,
             variant,
             solid,
-            walls,
+            open_sides,
         })
     }
 }

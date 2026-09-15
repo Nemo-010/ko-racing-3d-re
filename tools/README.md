@@ -146,9 +146,11 @@ u8    height_count
 repeat height_count:
     u8 value
     u8 extra  (only when value >= 100)
-u8    solid[4]              # four side flags
-u8    split                 # 0 -> walls = solid
-u8    walls[4]              (only when split != 0)
+u8    solid[4]              # four side flags, edge rendering / minimap only
+                          #   1 = the side is closed
+                          #   world side = solid[(i + arg) % 4]
+u8    split                 # 0 -> open = solid
+u8    open[4]               (only when split != 0)
 u8    unused
 collision:
     u8 vertex_count
@@ -161,6 +163,16 @@ collision:
 When `value < 100` the height entry is `(value, 1000.0)`; otherwise the
 world height is `14 * (value - 100) / 100` (`14` is the tile edge length,
 `ar.c`). All 62 shipped `.tl` files parse with zero trailing bytes.
+
+**The second flag block is the drivable-side flag, not walls.** Class `ar`
+keeps it in `b[]` and `bm.b(i)` returns `ar.b((i + arg) % 4)`; the `bs`
+flood that walks the track branches on exactly that call. Reading it as
+"open" is what makes the road graph work: with `open` (rotated by `arg`)
+all 40 shipped maps become fully connected, with a mostly degree-2 ring
+topology. Reading `solid` instead leaves most maps in disconnected
+fragments. The `solid` block is only used to draw tile edges and the
+minimap, and most tiles ship no collision mesh at all - which is why the
+MIDlet's height sampling falls back to a flat plane at height zero.
 
 ## `.map` — track layout (`bs.a(InputStream, boolean)`)
 

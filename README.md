@@ -127,8 +127,13 @@ Full byte tables are in [`tools/README.md`](tools/README.md). Summary:
   list.  Rendered through M3G scale/bias: `value * scale + (128*scale + bias)`.
 * **`.car`** — model, low-model (ignored), texture, display name, 4 stat
   bytes, 39 unread bytes.
-* **`.tl`** — tile outline points, edges, heights, four side flags, and a
-  triangle-soup collision mesh.  All 62 files parse to the exact byte.
+* **`.tl`** — tile outline points, edges, heights, two 4-byte side-flag
+  blocks, and a triangle-soup collision mesh.  All 62 files parse to the
+  exact byte.  The second flag block is the **drivable-side** flag (rotated by
+  the cell argument), which is what makes the tracks connected: using it, all
+  40 maps form a single connected road graph; using the first block instead,
+  28 of them fall apart into fragments.  Most tiles ship no collision mesh,
+  which is why the MIDlet's height sampling falls back to a flat plane.
 * **`.ob`** — model + texture + flag.
 * **`.bck`** — texture + 4 RGB colours + detail byte + two fog scales.
 * **`.md` / `.hd`** — mid/high-detail decoration layers.
@@ -201,21 +206,25 @@ cargo run --release     # drive levels/1.map in cars/rally.car
 cargo test --release    # headless checks: archive, all 40 tracks, physics
 ```
 
-Implemented: resource-archive reader, all format parsers (mesh, `.tl`,
-`.map`, `.car`, `.ob`, `.hd`, `.md`, `.tab`/font), track baking into
-per-texture meshes plus a rapier collision trimesh, a rapier raycast vehicle
-with engine/brake/steering, a chase camera and a HUD drawn with the game's
-own bitmap font.  Not implemented: menus, career/progression, opponent AI,
-audio and the Bluetooth/Vserv/SMS code paths.  See
+Implemented: resource-archive reader; all format parsers (mesh, `.tl`,
+`.map`, `.car`, `.ob`, `.hd`, `.md`, `.tab`/font); track baking into
+per-texture meshes; a road graph built from the tiles' drivable-side flags;
+a rapier collision world with one flat quad per road cell and barriers on
+closed sides; a rapier raycast vehicle for the player plus AI opponents that
+follow the road; lap, checkpoint and timing rules with a live HUD drawn in
+the game's own bitmap font.  `cargo test --release` runs 11 headless checks,
+including building all 40 tracks and driving AI round three of them.
+
+Not implemented: menus, career/progression, audio and the
+Bluetooth/Vserv/SMS code paths.  See
 [`rust/kora/README.md`](rust/kora/README.md).
 
 ## Suggested next steps
 
-1. Extend the Rust port from a single playable race to the full loop
-   (career from `campaign.000`, opponent AI, lap/checkpoint timing from the
-   `.map` trailer).
-2. Turn the decoded `.map` + `.tl` + `.hd`/`.md`/`.ob` data into a full
-   3D track exporter; the library already exposes every field the game
-   uses to place a cell (`tools/kora/formats.py`).
-3. Repack support: the pack format is simple enough to write, enabling
+1. Pin down the `.001` race-record indexing and drive laps/opponents from the
+   campaign tables instead of environment variables.
+2. Track elevation: build the collider from each tile's collision mesh where
+   one exists, so bridges and jumps stop being flat.
+3. Menus and car selection, then the career loop over `campaign.000`.
+4. Repack support: the pack format is simple enough to write, enabling
    asset swaps or a JAR rebuild.

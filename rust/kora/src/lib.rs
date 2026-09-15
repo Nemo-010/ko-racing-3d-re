@@ -7,8 +7,11 @@
 
 #![allow(dead_code)]
 
+pub mod ai;
 pub mod format;
+pub mod grid;
 pub mod pack;
 pub mod physics;
+pub mod race;
 pub mod scene;
 pub mod text;

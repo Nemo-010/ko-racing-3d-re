@@ -1,20 +1,23 @@
 //! K.O. Racing 3D - Rust reimplementation of the Jollybox J2ME racer.
 //!
 //! The original MIDlet reads every asset out of its own `data`/`data.<n>`
-//! archive; this port does exactly the same, parsing the model, tile, map
-//! and car formats directly instead of converting them.  Rendering is
+//! archive; this port does exactly the same, parsing the model, tile, map,
+//! car and font formats directly instead of converting them.  Rendering is
 //! macroquad, physics is rapier3d's raycast vehicle controller.
 //!
-//! Controls: arrows or WASD to drive, space to handbrake, R to respawn,
+//! Controls: arrows or WASD to drive, space to handbrake, R to restart,
 //! Esc to quit.  `KORA_MAP=3.map` picks another track, `KORA_CAR=cars/sport.car`
-//! another car, and `KORA_ASSETS` another resource directory.
+//! another car, `KORA_LAPS=5` and `KORA_OPPONENTS=5` set the race, and
+//! `KORA_ASSETS` points at a different resource directory.
 
 use std::path::PathBuf;
 
 use macroquad::models::{draw_mesh, Mesh};
 use macroquad::prelude::*;
 
-use kora::physics::{Input, Vehicle};
+use kora::ai::AiDriver;
+use kora::physics::{CarControl, World};
+use kora::race::Race;
 use kora::text::GameFont;
 use kora::{format, pack, scene};
 
@@ -31,6 +34,20 @@ fn assets_dir() -> PathBuf {
     PathBuf::from("assets")
 }
 
+fn env_number(name: &str, default: u32, max: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+        .min(max)
+}
+
+fn format_time(seconds: f32) -> String {
+    let minutes = (seconds / 60.0) as u32;
+    let rest = seconds - minutes as f32 * 60.0;
+    format!("{minutes}:{rest:05.2}")
+}
+
 #[macroquad::main("K.O. Racing 3D - Rust port")]
 async fn main() {
     let dir = assets_dir();
@@ -39,12 +56,16 @@ async fn main() {
     println!("  {} resources indexed", resources.len());
 
     let map_name = std::env::var("KORA_MAP").unwrap_or_else(|_| "1.map".to_string());
+    let laps = env_number("KORA_LAPS", 3, 99);
+    let opponents = env_number("KORA_OPPONENTS", 3, 7);
     let mut track = scene::build(&dir, &resources, &map_name);
     println!(
-        "track {}: {} mesh batches, {} collision triangles",
+        "track {}: {} mesh batches, {} collision triangles, {} road cells, {} gates",
         map_name,
         track.meshes.len(),
-        track.collision_indices.len()
+        track.collision_indices.len(),
+        track.grid.path().len(),
+        track.grid.gates().len()
     );
     track.attach_textures(&resources);
 
@@ -57,55 +78,106 @@ async fn main() {
     let car = scene::build_car(&resources, &car_def).expect("car model");
     let car_texture = scene::load_car_texture(&resources, &car);
 
-    let mut vehicle = Vehicle::new(
+    let mut world = World::new(
         track.collision_vertices,
         track.collision_indices,
-        track.spawn,
-        track.spawn_yaw,
-        car.half_extents,
+        &track.walls,
     );
-    let font = GameFont::load(&resources, "font");
 
+    // Starting grid: the player on the line, opponents behind, all of them
+    // placed on road cells and facing the way the circuit is raced.
+    let slots = track.grid.grid_slots(1 + opponents as usize);
+    let mut player = 0;
+    for (index, &(spot, yaw)) in slots.iter().enumerate() {
+        let car = world.add_car(spot, yaw, car.half_extents);
+        if index == 0 {
+            player = car;
+        }
+    }
+
+    let now = get_time();
+    let mut races: Vec<Race> = (0..world.cars.len())
+        .map(|index| Race::new(&track.grid, laps, world.position(index), now))
+        .collect();
+    let mut drivers: Vec<AiDriver> = (0..world.cars.len())
+        .map(|index| AiDriver::new(if index == 0 { 1.0 } else { 0.84 + 0.06 * index as f32 }))
+        .collect();
+
+    let font = GameFont::load(&resources, "font");
     let mut camera_position = track.spawn + vec3(0.0, 5.0, 9.0);
-    let mut fastest = 0.0f32;
 
     loop {
         if is_key_pressed(KeyCode::Escape) {
             break;
         }
         if is_key_pressed(KeyCode::R) {
-            vehicle.reset();
+            let restart = get_time();
+            for index in 0..world.cars.len() {
+                world.reset(index);
+                let position = world.position(index);
+                races[index] = Race::new(&track.grid, laps, position, restart);
+            }
+            camera_position = track.spawn + vec3(0.0, 5.0, 9.0);
         }
 
-        let mut input = Input::default();
-        input.throttle = if is_key_down(KeyCode::Up) || is_key_down(KeyCode::W) {
+        // --- controls -----------------------------------------------------
+        let mut controls = vec![CarControl::default(); world.cars.len()];
+        let (position, rotation) = world.pose(player);
+        controls[player].throttle = if is_key_down(KeyCode::Up) || is_key_down(KeyCode::W) {
             1.0
         } else if is_key_down(KeyCode::Down) || is_key_down(KeyCode::S) {
             -0.6
         } else {
             0.0
         };
-        // Positive steering turns the wheels left (about +Y).
-        input.steer = if is_key_down(KeyCode::Left) || is_key_down(KeyCode::A) {
+        controls[player].steer = if is_key_down(KeyCode::Left) || is_key_down(KeyCode::A) {
             1.0
         } else if is_key_down(KeyCode::Right) || is_key_down(KeyCode::D) {
             -1.0
         } else {
             0.0
         };
-        input.brake = is_key_down(KeyCode::Space);
+        controls[player].brake = is_key_down(KeyCode::Space);
 
+        for index in 0..world.cars.len() {
+            if index == player {
+                continue;
+            }
+            let (opponent_position, opponent_rotation) = world.pose(index);
+            let heading = opponent_rotation * vec3(0.0, 0.0, -1.0);
+            controls[index] = drivers[index].control(
+                &track.grid,
+                opponent_position,
+                heading,
+                world.speed(index),
+                get_frame_time().min(0.05),
+            );
+        }
+
+        // --- simulate -----------------------------------------------------
         let dt = get_frame_time().min(0.05);
         let substeps = ((dt / (1.0 / 60.0)).ceil() as i32).clamp(1, 4);
         for _ in 0..substeps {
-            vehicle.step(dt / substeps as f32, &input);
+            world.step(dt / substeps as f32, &controls);
         }
 
-        let (position, rotation) = vehicle.pose();
-        if position.y < -40.0 {
-            vehicle.reset();
+        let now = get_time();
+        for index in 0..world.cars.len() {
+            let place = world.position(index);
+            if place.y < -40.0 {
+                if index == player {
+                    world.reset(index);
+                } else {
+                    let (cell_x, cell_y) = track.grid.cell_of(vec3(place.x, 0.0, place.z));
+                    let spin = world.pose(index).1;
+                    let yaw = 2.0 * spin.y.atan2(spin.w);
+                    world.replace(index, track.grid.center(cell_x, cell_y), yaw);
+                }
+            }
+            races[index].update(now, &track.grid, world.position(index));
         }
 
+        // --- camera -------------------------------------------------------
         let forward = rotation * vec3(0.0, 0.0, -1.0);
         let up = vec3(0.0, 1.0, 0.0);
         let desired = position - forward * 5.0 + up * 2.2;
@@ -124,46 +196,103 @@ async fn main() {
             draw_mesh(mesh);
         }
 
-        let mut vertices = car.vertices.clone();
-        for vertex in &mut vertices {
-            vertex.position = rotation * vertex.position + position;
+        for index in 0..world.cars.len() {
+            let (place, spin) = world.pose(index);
+            let mut vertices = car.vertices.clone();
+            for vertex in &mut vertices {
+                vertex.position = spin * vertex.position + place;
+            }
+            draw_mesh(&Mesh {
+                vertices,
+                indices: car.indices.clone(),
+                texture: car_texture.clone(),
+            });
         }
-        draw_mesh(&Mesh {
-            vertices,
-            indices: car.indices.clone(),
-            texture: car_texture.clone(),
-        });
 
         set_default_camera();
 
-        let speed = vehicle.speed();
-        fastest = fastest.max(speed);
+        // --- HUD ----------------------------------------------------------
+        let standings: Vec<usize> = {
+            let mut order: Vec<usize> = (0..world.cars.len()).collect();
+            order.sort_by(|&a, &b| {
+                races[b]
+                    .progress(&track.grid, world.position(b))
+                    .partial_cmp(&races[a].progress(&track.grid, world.position(a)))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            order
+        };
+        let player_place = standings.iter().position(|&car| car == player).unwrap_or(0) + 1;
+        let race = &races[player];
+
         if let Some(font) = &font {
             let scale = 2.0;
-            font.draw_shadow("K.O. RACING 3D", 16.0, 14.0, scale, WHITE);
+            font.draw_shadow(&race_name(&map_name), 16.0, 14.0, scale, WHITE);
             font.draw_shadow(
-                &format!("SPEED {:>4}", (speed * 10.0) as i32),
+                &format!("LAP {}/{}", (race.lap + 1).min(race.laps), race.laps),
                 16.0,
                 48.0,
                 scale,
                 WHITE,
             );
             font.draw_shadow(
-                &format!("BEST  {:>4}", (fastest * 10.0) as i32),
+                &format!("POS {}/{}", player_place, world.cars.len()),
                 16.0,
                 82.0,
                 scale,
-                Color::new(1.0, 0.85, 0.2, 1.0),
+                WHITE,
             );
             font.draw_shadow(
-                "ARROWS DRIVE   SPACE BRAKE   R RESPAWN",
+                &format!("TIME {}", format_time(race.total_time(now))),
+                16.0,
+                116.0,
+                scale,
+                WHITE,
+            );
+            let best = race
+                .best
+                .map(format_time)
+                .unwrap_or_else(|| "--:--.--".to_string());
+            font.draw_shadow(
+                &format!("LAP {}  BEST {}", format_time(race.lap_time(now)), best),
+                16.0,
+                150.0,
+                scale,
+                Color::new(1.0, 0.85, 0.2, 1.0),
+            );
+            if race.finished {
+                let text = format!("FINISHED  {}", format_time(race.finish_time.unwrap_or(0.0)));
+                let width = font.width(&text, 3.0);
+                font.draw_shadow(
+                    &text,
+                    (screen_width() - width) / 2.0,
+                    screen_height() * 0.35,
+                    3.0,
+                    Color::new(1.0, 0.9, 0.3, 1.0),
+                );
+            }
+            font.draw_shadow(
+                "ARROWS DRIVE   SPACE BRAKE   R RESTART",
                 16.0,
                 screen_height() - 40.0,
                 1.5,
                 Color::new(0.9, 0.9, 0.9, 1.0),
             );
         } else {
-            draw_text(&format!("speed {:.1}", speed), 16.0, 30.0, 30.0, WHITE);
+            draw_text(
+                &format!("lap {}  {:.1}", race.lap, world.speed(player)),
+                16.0,
+                30.0,
+                30.0,
+                WHITE,
+            );
         }
     }
+}
+
+fn race_name(map_name: &str) -> String {
+    map_name
+        .trim_end_matches(".map")
+        .to_ascii_uppercase()
+        .replace("MAP", "TRACK ")
 }

@@ -227,8 +227,8 @@ class Tile:
     points: List[Tuple[float, float]]       # polygon outline, percent of tile
     edges: List[Tuple[int, int]]            # index pairs into ``points``
     heights: List[Tuple[float, float]]      # (value, threshold-or-world-height)
-    solid: List[bool]                       # four side flags
-    walls: List[bool]                       # four side flags for barriers
+    solid: List[bool]                       # four side flags, edge rendering only
+    open_sides: List[bool]                  # four drivable-side flags (see note)
     collision: Optional["Collision"]
 
     @classmethod
@@ -256,17 +256,23 @@ class Tile:
                 heights.append((float(r.u8()), 14.0 * (value - 100) / 100.0))
 
         solid = [r.u8() != 0 for _ in range(4)]
+        # A side is drivable when the matching flag is set.  The world side is
+        # (i + arg) % 4, where arg is the cell's rotation from the .map.  This
+        # is what class `ar` keeps in `b[]` and what `bm.b(i)` returns, i.e.
+        # the flag the `bs` track flood branches on; despite reading like
+        # "walls" it is not the closed-side flag.  Using `solid` here instead
+        # leaves most maps in disconnected fragments.
         if r.u8() != 0:
-            walls = [r.u8() != 0 for _ in range(4)]
+            open_sides = [r.u8() != 0 for _ in range(4)]
         else:
-            walls = list(solid)
+            open_sides = list(solid)
         r.u8()                              # discarded
 
         collision = Collision.parse(r) if r.remaining else None
         r.done()
         return cls(name, texture, variant,
                    [(x, y) for x, y in points], edges, heights,
-                   solid, walls, collision)
+                   solid, open_sides, collision)
 
 
 @dataclass

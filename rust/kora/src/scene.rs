@@ -21,6 +21,7 @@ use macroquad::texture::Texture2D;
 use rapier3d::prelude::Vector as RVector;
 
 use crate::format;
+use crate::grid::Grid;
 use crate::pack::{self, Resources};
 
 /// World size of one tile (`ar.c` in the MIDlet).
@@ -29,11 +30,15 @@ pub const TILE: f32 = 14.0;
 pub const WORLD_SCALE: f32 = 7.01;
 
 pub struct Track {
+    /// Road graph: which cells exist and which sides are drivable.
+    pub grid: Grid,
     pub meshes: Vec<Mesh>,
     /// Texture resource for each mesh, parallel to `meshes`.
     pub texture_paths: Vec<String>,
     pub collision_vertices: Vec<RVector>,
     pub collision_indices: Vec<[u32; 3]>,
+    /// Edge barriers as `(centre, half extents)` in macroquad space.
+    pub walls: Vec<(Vec3, Vec3)>,
     pub spawn: Vec3,
     pub spawn_yaw: f32,
 }
@@ -94,8 +99,6 @@ impl Batch {
 struct Builder<'a> {
     res: &'a Resources,
     batches: HashMap<String, Batch>,
-    collision_vertices: Vec<RVector>,
-    collision_indices: Vec<[u32; 3]>,
 }
 
 impl<'a> Builder<'a> {
@@ -103,8 +106,6 @@ impl<'a> Builder<'a> {
         Builder {
             res,
             batches: HashMap::new(),
-            collision_vertices: Vec::new(),
-            collision_indices: Vec::new(),
         }
     }
 
@@ -116,7 +117,6 @@ impl<'a> Builder<'a> {
         scale: [f32; 3],
         yaw: f32,
         origin: [f32; 3],
-        collide: bool,
     ) {
         let Some(model) = parse_model(self.res, model_path) else {
             return;
@@ -151,15 +151,6 @@ impl<'a> Builder<'a> {
             batch.triangle((points[0], uv[0]), (points[1], uv[1]), (points[2], uv[2]));
         }
 
-        if collide {
-            for points in &geometry {
-                let base = self.collision_vertices.len() as u32;
-                for p in points {
-                    self.collision_vertices.push(RVector::new(p.x, p.y, p.z));
-                }
-                self.collision_indices.push([base, base + 1, base + 2]);
-            }
-        }
     }
 }
 
@@ -217,7 +208,6 @@ pub fn build(dir: &Path, res: &Resources, map_name: &str) -> Track {
                             [WORLD_SCALE; 3],
                             arg as f32 * half,
                             [ox, oy, 0.0],
-                            true,
                         );
                     }
                 }
@@ -244,7 +234,6 @@ pub fn build(dir: &Path, res: &Resources, map_name: &str) -> Track {
                         [WORLD_SCALE; 3],
                         arg as f32 * half,
                         [ox, oy, 0.0],
-                        false,
                     );
                 }
             }
@@ -297,34 +286,64 @@ pub fn build(dir: &Path, res: &Resources, map_name: &str) -> Track {
                         [WORLD_SCALE; 3],
                         arg as f32 * half,
                         [lx, ly, pz],
-                        false,
                     );
                 }
             }
         }
     }
 
-    let (sx, sy) = map.start;
-    let origin = [sx as f32 * TILE, sy as f32 * TILE, 0.0];
-    // Face the first neighbouring cell that is part of the track.
-    let mut spawn_yaw = 0.0f32;
-    for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
-        if map
-            .cell(sx as i32 + dx, sy as i32 + dy)
-            .is_some_and(|c| c.tile.is_some())
-        {
-            // The car's nose is +Y in game space; yaw rotates that onto (dx, dy).
-            spawn_yaw = (-(dx as f32)).atan2(dy as f32);
-            break;
+    let origin = [map.start.0 as f32 * TILE, map.start.1 as f32 * TILE, 0.0];
+    let grid = Grid::build(&map, &tiles);
+    // Start facing the way the circuit is raced.
+    let (spawn, spawn_yaw) = grid
+        .grid_slots(1)
+        .first()
+        .copied()
+        .map(|(position, yaw)| (position, yaw))
+        .unwrap_or((
+            vec3(origin[0], 1.2, -origin[1]),
+            0.0,
+        ));
+
+    let Builder { batches, .. } = builder;
+
+    // Physics ground.  The MIDlet samples the tile's collision mesh for height
+    // and falls back to a flat plane at zero when a tile has none - which is
+    // the case for most of them (`s.tl` and friends ship no collision data).
+    // Baking the *visual* triangles instead leaves gaps between cell corners
+    // that cars drop through, so the collider is one flat quad per road cell
+    // plus a barrier wherever a side is not drivable.
+    let mut collision_vertices: Vec<RVector> = Vec::new();
+    let mut collision_indices: Vec<[u32; 3]> = Vec::new();
+    let mut walls: Vec<(Vec3, Vec3)> = Vec::new();
+    let half_tile = TILE * 0.5;
+    for (x, y) in grid.path() {
+        let centre = grid.center(x, y);
+        let base = collision_vertices.len() as u32;
+        for (dx, dz) in [
+            (-half_tile, -half_tile),
+            (-half_tile, half_tile),
+            (half_tile, half_tile),
+            (half_tile, -half_tile),
+        ] {
+            collision_vertices.push(RVector::new(centre.x + dx, centre.y, centre.z + dz));
+        }
+        collision_indices.push([base, base + 1, base + 2]);
+        collision_indices.push([base, base + 2, base + 3]);
+
+        for dir in 0..4 {
+            if grid.open_sides(x, y) & (1 << dir) != 0 {
+                continue;
+            }
+            let direction = crate::grid::dir_mq(dir);
+            let (hx, hz) = if dir % 2 == 0 {
+                (0.6, half_tile)
+            } else {
+                (half_tile, 0.6)
+            };
+            walls.push((centre + direction * half_tile, vec3(hx, 1.1, hz)));
         }
     }
-
-    let Builder {
-        batches,
-        collision_vertices,
-        collision_indices,
-        ..
-    } = builder;
 
     let mut meshes = Vec::new();
     let mut texture_paths = Vec::new();
@@ -343,11 +362,13 @@ pub fn build(dir: &Path, res: &Resources, map_name: &str) -> Track {
     }
 
     Track {
+        grid,
         meshes,
         texture_paths,
         collision_vertices,
         collision_indices,
-        spawn: vec3(origin[0], 1.2, -origin[1]),
+        walls,
+        spawn,
         spawn_yaw,
     }
 }

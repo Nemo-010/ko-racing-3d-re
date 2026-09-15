@@ -5,7 +5,8 @@
 
 use std::path::PathBuf;
 
-use kora::physics::{Input, Vehicle};
+use macroquad::prelude::{vec3, Vec3};
+use kora::physics::{CarControl, World};
 use kora::{format, pack, scene};
 
 fn assets() -> PathBuf {
@@ -83,10 +84,12 @@ fn track_geometry_and_collision() {
     assert!(!track.meshes.is_empty(), "no mesh batches");
     assert_eq!(track.meshes.len(), track.texture_paths.len());
     assert!(
-        track.collision_indices.len() > 100,
-        "only {} collision triangles",
-        track.collision_indices.len()
+        track.collision_indices.len() >= track.grid.path().len() * 2,
+        "{} collision triangles for {} road cells",
+        track.collision_indices.len(),
+        track.grid.path().len()
     );
+    assert!(!track.walls.is_empty(), "the track has no barriers");
     for mesh in &track.meshes {
         assert!(!mesh.vertices.is_empty());
         assert_eq!(mesh.indices.len() % 3, 0);
@@ -123,41 +126,325 @@ fn every_track_builds_geometry() {
 }
 
 #[test]
-fn car_settles_on_the_track() {
+fn car_settles_and_drives_on_the_track() {
     let dir = assets();
     let resources = pack::load(&dir);
     let track = scene::build(&dir, &resources, "1.map");
     let car = format::Car::parse(&resources["cars/rally.car"]).unwrap();
     let geometry = scene::build_car(&resources, &car).unwrap();
 
-    let mut vehicle = Vehicle::new(
-        track.collision_vertices,
-        track.collision_indices,
-        track.spawn,
-        track.spawn_yaw,
-        geometry.half_extents,
-    );
-    let input = Input::default();
+    let scene::Track {
+        collision_vertices,
+        collision_indices,
+        walls,
+        spawn,
+        spawn_yaw,
+        ..
+    } = track;
+    let mut world = World::new(collision_vertices, collision_indices, &walls);
+    let player = world.add_car(spawn, spawn_yaw, geometry.half_extents);
+
+    let idle = [CarControl::default()];
     for _ in 0..240 {
-        vehicle.step(1.0 / 60.0, &input);
+        world.step(1.0 / 60.0, &idle);
     }
-    let (position, _) = vehicle.pose();
+    let resting = world.position(player);
     assert!(
-        position.y > -10.0 && position.y < 40.0,
-        "car did not rest on the track: {position:?}"
+        resting.y > -10.0 && resting.y < 40.0,
+        "car did not rest on the track: {resting:?}"
     );
 
-    // And it should actually drive forward under throttle.
-    let drive = Input {
+    let drive = [CarControl {
         throttle: 1.0,
         ..Default::default()
-    };
+    }];
     for _ in 0..120 {
-        vehicle.step(1.0 / 60.0, &drive);
+        world.step(1.0 / 60.0, &drive);
     }
-    let (moved, _) = vehicle.pose();
+    let moved = (world.position(player) - resting).length();
+    assert!(moved > 0.5, "car did not move under throttle ({moved:.2})");
+}
+
+/// Every shipped map must produce a connected road graph whose cells line up
+/// with the tiles the scene builder places.
+#[test]
+fn grid_is_connected_for_every_track() {
+    use kora::grid::Grid;
+    let dir = assets();
+    let resources = pack::load(&dir);
+    let maps: Vec<String> = {
+        let mut names: Vec<String> = resources
+            .keys()
+            .filter(|name| name.starts_with("levels/") && name.ends_with(".map"))
+            .map(|name| name.trim_start_matches("levels/").to_string())
+            .collect();
+        names.sort();
+        names
+    };
+    for name in maps {
+        let track = scene::build(&dir, &resources, &name);
+        let grid: Grid = track.grid;
+        let cells = grid.path();
+        assert!(!cells.is_empty(), "{name}: no road cells");
+        assert!(grid.occupied(grid.start.0, grid.start.1), "{name}: start off-road");
+        assert!(grid.occupied(grid.finish.0, grid.finish.1), "{name}: finish off-road");
+
+        // Flood fill from the start; every road cell has to be reachable.
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![grid.start];
+        seen.insert(grid.start);
+        while let Some((x, y)) = stack.pop() {
+            for (_, nx, ny) in grid.neighbours(x, y) {
+                if seen.insert((nx, ny)) {
+                    stack.push((nx, ny));
+                }
+            }
+        }
+        assert_eq!(
+            seen.len(),
+            cells.len(),
+            "{name}: road graph is not connected ({} of {} cells)",
+            seen.len(),
+            cells.len()
+        );
+
+        // Every road cell must have at least one drivable side, and the start
+        // must lead somewhere the race direction can follow.
+        for &(x, y) in &cells {
+            assert!(
+                !grid.neighbours(x, y).is_empty(),
+                "{name}: cell ({x},{y}) is a dead end"
+            );
+        }
+        assert!(grid.race_dir().is_some(), "{name}: no race direction");
+
+        // The starting grid has to sit on road cells, facing along the track.
+        let slots = grid.grid_slots(6);
+        assert!(!slots.is_empty(), "{name}: empty starting grid");
+        for &(position, _) in &slots {
+            let (sx, sy) = grid.cell_of(position);
+            assert!(
+                grid.occupied(sx, sy),
+                "{name}: grid slot at ({sx},{sy}) is off-road"
+            );
+        }
+    }
+}
+
+/// The AI target must always be a point on another drivable cell.
+#[test]
+fn ai_targets_stay_on_the_road() {
+    let dir = assets();
+    let resources = pack::load(&dir);
+    let track = scene::build(&dir, &resources, "1.map");
+    let grid = &track.grid;
+    let mut checked = 0;
+    for (x, y) in grid.path() {
+        for (dir_index, _, _) in grid.neighbours(x, y) {
+            let heading = kora::grid::dir_mq(dir_index);
+            let position = grid.center(x, y);
+            let target = grid
+                .target(position, heading)
+                .expect("target for a connected side");
+            let (tx, ty) = grid.cell_of(target);
+            assert!(
+                grid.occupied(tx, ty),
+                "target for cell ({x},{y}) side {dir_index} left the road"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 30, "only checked {checked} sides");
+}
+
+/// A lap needs every checkpoint in order; sitting on the line is not a lap.
+#[test]
+fn laps_require_checkpoints_in_order() {
+    use kora::race::Race;
+    let dir = assets();
+    let resources = pack::load(&dir);
+
+    // A circuit with no checkpoints: leaving and returning to the finish line
+    // is one lap, and idling on the line is not.
+    let track = scene::build(&dir, &resources, "1.map");
+    let grid = &track.grid;
+    assert_eq!(grid.gates().len(), 1, "1.map should be a simple circuit");
+    let line = grid.center(grid.finish.0, grid.finish.1);
+    let away = line + vec3(400.0, 0.0, 0.0);
+    let mut race = Race::new(grid, 2, line, 0.0);
+    race.update(1.0, grid, line);
+    assert_eq!(race.lap, 0, "an idle car on the line scored a lap");
+    race.update(2.0, grid, away);
+    race.update(3.0, grid, line);
+    assert_eq!(race.lap, 1);
+    race.update(4.0, grid, away);
+    race.update(5.0, grid, line);
+    assert_eq!(race.lap, 2);
+    assert!(race.finished, "race with 2 laps did not finish");
+    assert_eq!(race.lap_times.len(), 2);
+
+    // A track with checkpoints must refuse to count a lap until they are done.
+    let track = scene::build(&dir, &resources, "mc5.map");
+    let grid = &track.grid;
+    assert_eq!(grid.gates().len(), 3, "mc5.map should carry two checkpoints");
+    let line = grid.center(grid.finish.0, grid.finish.1);
+    let away = line + vec3(0.0, 0.0, 400.0);
+    let mut race = Race::new(grid, 3, line, 0.0);
+    race.update(1.0, grid, away);
+    race.update(2.0, grid, line);
+    assert_eq!(race.lap, 0, "a lap was counted without the checkpoints");
+    for &gate in grid.gates()[1..].iter() {
+        let centre = grid.center(gate.0, gate.1);
+        race.update(3.0, grid, centre + vec3(200.0, 0.0, 0.0));
+        race.update(4.0, grid, centre);
+    }
+    race.update(5.0, grid, away);
+    race.update(6.0, grid, line);
+    assert_eq!(race.lap, 1, "checkpoints in order did not complete a lap");
+}
+
+/// A grid of opponents, driven only by the AI, must get round the track.
+#[test]
+fn opponents_drive_the_track() {
+    use kora::grid::Grid;
+    use kora::physics::{CarControl, World};
+    use kora::race::Race;
+    let dir = assets();
+    let resources = pack::load(&dir);
+    let track = scene::build(&dir, &resources, "1.map");
+    let car = format::Car::parse(&resources["cars/rally.car"]).unwrap();
+    let geometry = scene::build_car(&resources, &car).unwrap();
+
+    let scene::Track {
+        grid,
+        collision_vertices,
+        collision_indices,
+        walls,
+        spawn,
+        spawn_yaw,
+        ..
+    } = track;
+    let grid: Grid = grid;
+
+    let mut world = World::new(collision_vertices, collision_indices, &walls);
+    for &(spot, yaw) in grid.grid_slots(4).iter() {
+        world.add_car(spot, yaw, geometry.half_extents);
+    }
+    let cars = world.cars.len();
+    let _ = (spawn, spawn_yaw);
+
+    let mut races: Vec<Race> = (0..cars).map(|i| Race::new(&grid, 3, world.position(i), 0.0)).collect();
+    let mut travelled = vec![0.0f32; cars];
+    let mut previous: Vec<Vec3> = (0..cars).map(|i| world.position(i)).collect();
+    let mut drivers: Vec<kora::ai::AiDriver> =
+        (0..cars).map(|_| kora::ai::AiDriver::new(1.0)).collect();
+
+    // 1.map is roughly 200 units round and the AI averages ~7 units/s, so a
+    // lap takes ~30 s; 90 s gives everyone room for two.
+    let steps = 90 * 60;
+    for step in 0..steps {
+        let mut controls = vec![CarControl::default(); cars];
+        for index in 0..cars {
+            let (position, rotation) = world.pose(index);
+            let heading = rotation * vec3(0.0, 0.0, -1.0);
+            controls[index] = drivers[index].control(
+                &grid,
+                position,
+                heading,
+                world.speed(index),
+                1.0 / 60.0,
+            );
+        }
+        world.step(1.0 / 60.0, &controls);
+        for index in 0..cars {
+            let place = world.position(index);
+            assert!(place.y > -30.0, "car {index} fell off at step {step}");
+            travelled[index] += (place - previous[index]).length();
+            previous[index] = place;
+            races[index].update(step as f64 / 60.0, &grid, place);
+        }
+    }
+
+    for index in 0..cars {
+        // A lap is ~200 units; a car that never moves must not pass this.
+        assert!(
+            travelled[index] > 250.0,
+            "car {index} only covered {:.1} units in 90 s",
+            travelled[index]
+        );
+        assert!(
+            races[index].lap >= 1,
+            "car {index} completed no lap of 1.map in 90 s"
+        );
+        assert!(
+            world.position(index).y > -5.0,
+            "car {index} ended up off the track"
+        );
+    }
+    let quickest = races
+        .iter()
+        .filter_map(|race| race.best)
+        .fold(f32::MAX, f32::min);
     assert!(
-        (moved - position).length() > 0.5,
-        "car did not move under throttle"
+        quickest > 10.0 && quickest < 70.0,
+        "implausible best lap of {quickest:.1} s"
     );
+}
+
+/// The AI has to stay on the road on every kind of track, not just the first.
+#[test]
+fn opponents_survive_other_tracks() {
+    use kora::ai::AiDriver;
+    use kora::physics::{CarControl, World};
+    let dir = assets();
+    let resources = pack::load(&dir);
+    let car = format::Car::parse(&resources["cars/rally.car"]).unwrap();
+    let geometry = scene::build_car(&resources, &car).unwrap();
+
+    // A long checkpoint circuit, a big open one and a twisty one.
+    for map in ["mc5.map", "sp3.map", "19.map"] {
+        let track = scene::build(&dir, &resources, map);
+        let scene::Track {
+            grid,
+            collision_vertices,
+            collision_indices,
+            walls,
+            ..
+        } = track;
+        let mut world = World::new(collision_vertices, collision_indices, &walls);
+        for &(spot, yaw) in grid.grid_slots(3).iter() {
+            world.add_car(spot, yaw, geometry.half_extents);
+        }
+        let cars = world.cars.len();
+        let mut drivers: Vec<AiDriver> =
+            (0..cars).map(|_| AiDriver::new(0.95)).collect();
+
+        for step in 0..(40 * 60) {
+            let mut controls = vec![CarControl::default(); cars];
+            for index in 0..cars {
+                let (position, rotation) = world.pose(index);
+                let heading = rotation * vec3(0.0, 0.0, -1.0);
+                controls[index] = drivers[index].control(
+                    &grid,
+                    position,
+                    heading,
+                    world.speed(index),
+                    1.0 / 60.0,
+                );
+            }
+            world.step(1.0 / 60.0, &controls);
+            for index in 0..cars {
+                let place = world.position(index);
+                assert!(
+                    place.y > -20.0,
+                    "{map}: car {index} fell off at step {step}"
+                );
+                let (cx, cy) = grid.cell_of(vec3(place.x, 0.0, place.z));
+                assert!(
+                    grid.occupied(cx, cy),
+                    "{map}: car {index} left the road at step {step} ({place:?})"
+                );
+            }
+        }
+    }
 }
