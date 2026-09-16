@@ -24,11 +24,8 @@ use kora::physics::{CarControl, Tuning, World};
 use kora::progress::{self, Progress};
 use kora::race::Race;
 use kora::text;
+use kora::settings::Settings;
 use kora::{format, hud, menu, music, pack, scene, sky, theme};
-
-/// Background music level.  The MIDlet has its own SOUND and VOLUME settings;
-/// this is the port's default.
-const MUSIC_VOLUME: f32 = 0.35;
 
 fn assets_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("KORA_ASSETS") {
@@ -54,6 +51,7 @@ fn env_number(name: &str, max: u32) -> Option<u32> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Main,
+    Options,
     Career,
     Deluxe,
     Quick,
@@ -110,9 +108,15 @@ fn start_race(
     dir: &PathBuf,
     event: &RaceEvent,
     car_file: &str,
+    settings: &Settings,
     back: Screen,
 ) -> Option<Running> {
-    let mut track = scene::build_themed(dir, resources, &event.map, event.theme);
+    let detail = match settings.quality {
+        kora::settings::Quality::Low => scene::Detail::Base,
+        kora::settings::Quality::Medium => scene::Detail::Mid,
+        kora::settings::Quality::High => scene::Detail::Full,
+    };
+    let mut track = scene::build_detailed(dir, resources, &event.map, event.theme, detail);
     track.attach_textures(resources);
     // The theme byte picks one of the five backgrounds (`al.q(j)`).
     let sky = sky::Sky::load(resources, event.theme);
@@ -184,19 +188,22 @@ impl Running {
 
     /// Advance the race by one frame.  Returns the outcome once the player has
     /// finished.
-    fn update(&mut self, dt: f32, laps: u32) -> Option<Outcome> {
+    fn update(&mut self, dt: f32, laps: u32, settings: &Settings) -> Option<Outcome> {
         let mut controls = vec![CarControl::default(); self.world.cars.len()];
-        controls[self.player].throttle = if is_key_down(KeyCode::Up) || is_key_down(KeyCode::W) {
+        // The control scheme picks the keys; auto-throttle drives for you.
+        let (accelerate, brake) = settings.scheme.throttle_keys();
+        let (left, right) = settings.scheme.steer_keys();
+        controls[self.player].throttle = if settings.auto_throttle || is_key_down(accelerate) {
             1.0
-        } else if is_key_down(KeyCode::Down) || is_key_down(KeyCode::S) {
+        } else if is_key_down(brake) {
             -0.6
         } else {
             0.0
         };
         // Positive steering turns the wheels left (about +Y).
-        controls[self.player].steer = if is_key_down(KeyCode::Left) || is_key_down(KeyCode::A) {
+        controls[self.player].steer = if is_key_down(left) {
             1.0
-        } else if is_key_down(KeyCode::Right) || is_key_down(KeyCode::D) {
+        } else if is_key_down(right) {
             -1.0
         } else {
             0.0
@@ -268,29 +275,39 @@ impl Running {
         None
     }
 
-    fn draw_world(&mut self, dt: f32) {
+    fn draw_world(&mut self, dt: f32, settings: &Settings) {
         let (position, rotation) = self.world.pose(self.player);
         let forward = rotation * vec3(0.0, 0.0, -1.0);
         let up = vec3(0.0, 1.0, 0.0);
-        let desired = position - forward * 5.0 + up * 2.2;
+        let (back, height) = settings.camera.placement();
+        let desired = position - forward * back + up * height;
         self.camera = self.camera.lerp(desired, (dt * 5.0).min(1.0));
 
         let mut camera = Camera3D::default();
         camera.position = self.camera;
         camera.target = position + forward * 3.0 + up * 0.8;
         camera.up = up;
-        camera.fovy = 62f32.to_radians();
-        camera.z_far = 4000.0;
+        camera.fovy = if settings.camera == kora::settings::Camera::Inside {
+            70f32.to_radians()
+        } else {
+            62f32.to_radians()
+        };
+        camera.z_far = settings.visibility.far_plane();
         set_camera(&camera);
 
         match &self.sky {
-            Some(sky) => sky.draw(),
-            None => clear_background(Color::new(0.53, 0.81, 0.92, 1.0)),
+            Some(sky) if settings.background => sky.draw(),
+            _ => clear_background(Color::new(0.53, 0.81, 0.92, 1.0)),
         }
         for mesh in &self.track.meshes {
             draw_mesh(mesh);
         }
         for index in 0..self.world.cars.len() {
+            // From inside you sit in the car; drawing its shell would put the
+            // camera behind a wall of polygons.
+            if settings.camera == kora::settings::Camera::Inside && index == self.player {
+                continue;
+            }
             let (place, spin) = self.world.pose(index);
             let mut vertices = self.geometry.vertices.clone();
             for vertex in &mut vertices {
@@ -305,7 +322,10 @@ impl Running {
         set_default_camera();
     }
 
-    fn draw_hud(&self, now: f64, laps: u32) {
+    fn draw_hud(&self, now: f64, laps: u32, settings: &Settings) {
+        if !settings.hud {
+            return;
+        }
         let race = &self.races[self.player];
         let place = self.place_of(self.player) + 1;
         text::draw_shadow(&self.event.name, 16.0, 14.0, 28.0, WHITE);
@@ -452,10 +472,17 @@ async fn main() {
         quick.len()
     );
 
+    let settings_path = PathBuf::from(
+        std::env::var("KORA_SETTINGS").unwrap_or_else(|_| "kora-settings.txt".to_string()),
+    );
+    let mut settings = Settings::load(&settings_path);
+
     // The one sound the game ships is a MIDI file at the JAR root, not in the
     // resource pack, so `setup.sh` puts it beside the pack.  macroquad cannot
     // play MIDI, so it is rendered here and handed over as a WAV.
-    let music_enabled = std::env::var("KORA_MUSIC").map(|v| v != "0").unwrap_or(true);
+    if std::env::var("KORA_MUSIC").map(|v| v == "0").unwrap_or(false) {
+        settings.music = false;
+    }
     let theme = std::fs::read(dir.join("sounds/theme.mid")).ok();
     let now = || std::time::Instant::now();
     let started = now();
@@ -474,13 +501,13 @@ async fn main() {
         }
     };
     let mut music_playing = false;
-    if music_enabled {
+    if settings.music {
         if let Some(track) = &track {
             play_sound(
                 track,
                 PlaySoundParams {
                     looped: true,
-                    volume: MUSIC_VOLUME,
+                    volume: settings.volume,
                 },
             );
             music_playing = true;
@@ -504,6 +531,7 @@ async fn main() {
     let mut screen = Screen::Main;
     let mut cursor = 0usize;
     let mut showroom_spin = 0.0f32;
+    let mut confirming_reset = false;
     let mut running: Option<Running> = None;
     let mut message = String::new();
 
@@ -519,7 +547,7 @@ async fn main() {
                 .get(progress.car)
                 .map(|car| car.file.clone())
                 .unwrap_or_else(|| "rally.car".to_string());
-            running = start_race(&resources, &dir, &event, &file, Screen::Quick);
+            running = start_race(&resources, &dir, &event, &file, &settings, Screen::Quick);
             if running.is_some() {
                 screen = Screen::Race;
             }
@@ -532,22 +560,25 @@ async fn main() {
 
         if let Some(track) = &track {
             if is_key_pressed(KeyCode::M) {
-                music_playing = !music_playing;
-                if music_playing {
-                    play_sound(
-                        track,
-                        PlaySoundParams {
-                            looped: true,
-                            volume: MUSIC_VOLUME,
-                        },
-                    );
-                } else {
+                settings.music = !settings.music;
+                settings.save(&settings_path);
+                music_playing = settings.music;
+                if !music_playing {
                     macroquad::audio::stop_sound(track);
                 }
             }
-            if !music_playing {
-                set_sound_volume(track, 0.0);
+            // The settings screen owns the volume; M and the row both feed it.
+            if settings.music && !music_playing {
+                play_sound(
+                    track,
+                    PlaySoundParams {
+                        looped: true,
+                        volume: settings.volume,
+                    },
+                );
+                music_playing = true;
             }
+            set_sound_volume(track, if music_playing { settings.volume } else { 0.0 });
         }
 
         match screen {
@@ -572,11 +603,31 @@ async fn main() {
                             cursor = progress.car.min(cars.len().saturating_sub(1));
                             screen = Screen::Cars;
                         }
+                        4 => {
+                            cursor = 0;
+                            screen = Screen::Options;
+                        }
                         _ => break,
                     }
                 }
                 if !message.is_empty() {
                     text::draw_shadow(&message, 16.0, 12.0, 19.0, WHITE);
+                }
+            }
+
+            Screen::Options => {
+                match menu::options(&theme, &mut settings, &mut cursor, &mut confirming_reset) {
+                    menu::OptionsAction::ResetCareer => {
+                        progress = Progress::default();
+                        progress.save(&save_path);
+                        message = labels::get("reset_complete").to_string();
+                    }
+                    menu::OptionsAction::Back => {
+                        settings.save(&settings_path);
+                        cursor = 0;
+                        screen = Screen::Main;
+                    }
+                    menu::OptionsAction::None => {}
                 }
             }
 
@@ -602,7 +653,7 @@ async fn main() {
                                     .get(progress.car)
                                     .map(|car| car.file.clone())
                                     .unwrap_or_else(|| "rally.car".to_string());
-                                running = start_race(&resources, &dir, &event, &file, screen);
+                                running = start_race(&resources, &dir, &event, &file, &settings, screen);
                                 if running.is_some() {
                                     screen = Screen::Race;
                                 } else {
@@ -660,9 +711,9 @@ async fn main() {
                     screen = Screen::Paused;
                 } else {
                     let laps = env_number("KORA_LAPS", 99).unwrap_or(run.event.laps).max(1);
-                    let finished = run.update(dt, laps);
-                    run.draw_world(dt);
-                    run.draw_hud(get_time(), laps);
+                    let finished = run.update(dt, laps, &settings);
+                    run.draw_world(dt, &settings);
+                    run.draw_hud(get_time(), laps, &settings);
                     if let Some(outcome) = finished {
                         // Keep the time if it beats the record, and pay the
                         // record's award the first time a race is passed.

@@ -15,15 +15,17 @@ use crate::campaign::RaceEvent;
 use crate::labels::mode_name;
 use crate::labels;
 use crate::progress::{CarInfo, Progress};
+use crate::settings::Settings;
 use crate::theme::Theme;
 
 /// The main menu, shared with `main` so the cursor and the labels agree.
 /// These are label keys rather than text.
-pub const MAIN_ITEMS: [&str; 5] = [
+pub const MAIN_ITEMS: [&str; 6] = [
     "menu_career",
     "menu_deluxe",
     "menu_quick",
     "menu_cars",
+    "options",
     "menu_quit",
 ];
 
@@ -403,4 +405,190 @@ pub fn results(
         return Action::Activate(0);
     }
     Action::None
+}
+
+
+// --------------------------------------------------------------------------
+// options
+// --------------------------------------------------------------------------
+/// What the options screen wants done about it.
+pub enum OptionsAction {
+    None,
+    /// Wipe the career, once the confirmation is answered.
+    ResetCareer,
+    Back,
+}
+
+/// The rows, in the order they are drawn.  Every one of them cycles a value
+/// with left and right or a click, which is how the MIDlet's own settings
+/// screens work - its rows are value pickers, not sliders.
+const OPTION_ROWS: [&str; 10] = [
+    "quality",
+    "camera",
+    "visibility",
+    "background",
+    "hud",
+    "scheme",
+    "auto_throttle",
+    "music",
+    "volume",
+    "reset_career",
+];
+
+/// The current value of a row, as a label key or a number.
+fn option_value(settings: &Settings, row: usize) -> String {
+    let on_off = |on: bool| labels::get(if on { "on" } else { "off" }).to_string();
+    match row {
+        0 => labels::get(settings.quality.key()).to_string(),
+        1 => labels::get(settings.camera.key()).to_string(),
+        2 => labels::get(settings.visibility.key()).to_string(),
+        3 => on_off(settings.background),
+        4 => on_off(settings.hud),
+        5 => labels::get(settings.scheme.key()).to_string(),
+        6 => on_off(settings.auto_throttle),
+        7 => on_off(settings.music),
+        8 => format!("{} / {}", settings.volume_steps(), crate::settings::MAX_VOLUME_STEPS),
+        _ => String::new(),
+    }
+}
+
+fn cycle_option(settings: &mut Settings, row: usize, forward: bool) {
+    match row {
+        0 => settings.quality = if forward { settings.quality.next() } else { settings.quality.previous() },
+        1 => settings.camera = if forward { settings.camera.next() } else { settings.camera.previous() },
+        2 => settings.visibility = if forward { settings.visibility.next() } else { settings.visibility.previous() },
+        3 => settings.background = !settings.background,
+        4 => settings.hud = !settings.hud,
+        5 => settings.scheme = if forward { settings.scheme.next() } else { settings.scheme.previous() },
+        6 => settings.auto_throttle = !settings.auto_throttle,
+        7 => settings.music = !settings.music,
+        8 => settings.cycle_volume(forward),
+        _ => {}
+    }
+}
+
+/// Which section heading a row falls under, if any.
+fn option_section(row: usize) -> Option<&'static str> {
+    match row {
+        0 => Some("graphics"),
+        5 => Some("controls"),
+        7 => Some("sound"),
+        _ => None,
+    }
+}
+
+pub fn options(
+    theme: &Theme,
+    settings: &mut Settings,
+    cursor: &mut usize,
+    confirming: &mut bool,
+) -> OptionsAction {
+    let mut activate: Option<usize> = None;
+    let mut backward = false;
+    let mut action = OptionsAction::None;
+
+    if *confirming {
+        // `105 ARE YOU SURE?` with `103 YES` and `104 NO`.
+        let size = vec2(320.0, 160.0);
+        let mut chosen: Option<&str> = None;
+        {
+            let mut ui = root_ui();
+            Window::new(hash!("kora-reset"), centred_window(size), size)
+                .label(labels::get("reset_career"))
+                .movable(false)
+                .close_button(false)
+                .ui(&mut *ui, |ui| {
+                    ui.label(None, labels::get("sure"));
+                    if ui.button(None, labels::get("yes")) {
+                        chosen = Some("yes");
+                    }
+                    if ui.button(None, labels::get("no")) {
+                        chosen = Some("no");
+                    }
+                });
+        }
+        match chosen {
+            Some(choice) => {
+                *confirming = false;
+                if choice == "yes" {
+                    return OptionsAction::ResetCareer;
+                }
+                return OptionsAction::None;
+            }
+            None => {}
+        }
+        if is_key_pressed(KeyCode::Escape) {
+            *confirming = false;
+        }
+        return OptionsAction::None;
+    }
+
+    let size = vec2(420.0, 120.0 + (OPTION_ROWS.len() + 3) as f32 * 42.0);
+    {
+        let mut ui = root_ui();
+        Window::new(hash!("kora-options"), centred_window(size), size)
+            .label(labels::get("options"))
+            .movable(false)
+            .close_button(false)
+            .ui(&mut *ui, |ui| {
+                for row in 0..OPTION_ROWS.len() {
+                    if let Some(section) = option_section(row) {
+                        ui.label(None, labels::get(section));
+                    }
+                    let value = option_value(settings, row);
+                    let text = if row == 9 {
+                        labels::get("reset_career").to_string()
+                    } else {
+                        format!("{}: {}", labels::get(OPTION_ROWS[row]), value)
+                    };
+                    let focused = row == *cursor;
+                    if focused {
+                        ui.push_skin(&theme.selected);
+                    }
+                    if ui.button(None, text.as_str()) {
+                        activate = Some(row);
+                    }
+                    let hovered = ui.last_item_hovered();
+                    if focused {
+                        ui.pop_skin();
+                    }
+                    if hovered {
+                        *cursor = row;
+                    }
+                }
+                ui.push_skin(&theme.selected);
+                if ui.button(None, labels::get("main_menu")) {
+                    action = OptionsAction::Back;
+                }
+                ui.pop_skin();
+            });
+    }
+
+    // The original's rows are value pickers: left and right change the value,
+    // and confirm does the same as the pointer.
+    if is_key_pressed(KeyCode::Up) {
+        *cursor = (*cursor + OPTION_ROWS.len() - 1) % OPTION_ROWS.len();
+    }
+    if is_key_pressed(KeyCode::Down) {
+        *cursor = (*cursor + 1) % OPTION_ROWS.len();
+    }
+    if is_key_pressed(KeyCode::Left) {
+        backward = true;
+        activate = Some(*cursor);
+    }
+    if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::Enter) {
+        activate = Some(*cursor);
+    }
+    if is_key_pressed(KeyCode::Escape) {
+        return OptionsAction::Back;
+    }
+
+    if let Some(row) = activate {
+        if row == 9 {
+            *confirming = true;
+        } else {
+            cycle_option(settings, row, !backward);
+        }
+    }
+    action
 }

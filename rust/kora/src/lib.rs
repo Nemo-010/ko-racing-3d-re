@@ -20,6 +20,7 @@ pub mod physics;
 pub mod progress;
 pub mod race;
 pub mod scene;
+pub mod settings;
 pub mod sky;
 pub mod text;
 pub mod theme;

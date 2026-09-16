@@ -188,8 +188,16 @@ Every format the game uses to build a track or a car is now decoded; only
 * **Bluetooth multiplayer.** JSR-82 `btspp://localhost:<port>;name=kora;
   authenticate=false;authorize=false;encrypt=false`, with a custom service
   record.
-* **RMS options** persist player name, graphics/audio/vibration settings and
-  progress.
+* **Persistence is five RMS record stores**, and they are separate concerns:
+  `KORa_1.1.1` holds the *settings* (record 1 being a Java `DataOutputStream`
+  blob - seventeen ints, fifteen booleans, four bytes and five strings, in the
+  fixed order `al.b()` writes them, covering graphics detail, view distance,
+  camera, HUD, transparency, the control scheme and its five key bindings,
+  auto-throttle, sound and volume, the player name and the activation key);
+  `KORa_record` holds career progress (`u.x()`/`u.y()`); `KORa_tour` and
+  `KORa_tour_list` hold the online tour and its downloads; and
+  `X_VSERV_PARAMETERS` is the ad SDK's.  The name carries the format's version,
+  so a stale record store is simply not found rather than misread.
 * **Deluxe campaign** (`br`, `KORa_deluxe`, `/images/map2.jpg`) is a second
   career track set shipped in the same JAR.
 
@@ -262,9 +270,10 @@ that follow the road; lap, checkpoint and timing rules; and menus - main menu,
 career event list, quick race, car selection with stat bars, pause and results
 - with the deluxe campaign's 13 extra levels opened by points rather than by the
 original's SMS purchase, career points and per-race best times, a display-only
-showroom, the `.bck` sky, a speedometer and minimap, menus built from
-macroquad's own UI toolkit and skinned to the original's palette (so they take
-a pointer as well as a keyboard), and no garage or medals,
+showroom, the `.bck` sky, a speedometer and minimap, an OPTIONS screen whose
+settings persist, menus built from macroquad's own UI toolkit and skinned to
+the original's palette (so they take a pointer as well as a keyboard), and no
+garage or medals,
 because the original has none.  No paywall and no network code of
 any kind.  On-screen text is set in
 Contrail One (SIL Open Font License, bundled in `rust/kora/fonts/`) and

@@ -31,6 +31,7 @@ cargo test --release                     # headless checks
 | --- | --- | --- |
 | `KORA_ASSETS` | `assets` | directory holding `data`, `data.*` and `lists/` |
 | `KORA_SAVE` | `kora-save.txt` | where points, best times and the chosen car are kept |
+| `KORA_SETTINGS` | `kora-settings.txt` | where the options screen's settings are kept |
 | `KORA_MUSIC` | unset | set to `0` to start with the music off |
 | `KORA_SKIP_MENU` | unset | set to boot straight into a race |
 | `KORA_MAP` | `1.map` | track for `KORA_SKIP_MENU` (any of the 40) |
@@ -38,9 +39,10 @@ cargo test --release                     # headless checks
 | `KORA_LAPS` | campaign, else `3` | overrides the race length |
 | `KORA_OPPONENTS` | campaign, else `3` | overrides the size of the grid |
 
-Controls: **arrows** or **WASD** to drive, **space** handbrake, **Esc** pause,
-**M** toggles the music, and in the menus arrows move, **Enter** confirms and
-**Esc** goes back.
+Controls: the **control scheme** picked in OPTIONS decides which keys drive -
+CLASSIC is the arrow keys, LEFT-HANDED is WASD and RIGHT-HANDED is the numeric
+keypad - **space** is the handbrake, **Esc** pauses, **M** toggles the music,
+and in the menus the arrows move, **Enter** confirms and **Esc** goes back.
 
 ## What is implemented
 
@@ -147,6 +149,7 @@ src/scene.rs     map -> baked meshes + collision + barriers + car geometry
 src/physics.rs   rapier world and cars
 src/ai.rs        opponent driving
 src/race.rs      laps, checkpoints and timing
+src/settings.rs  the options screen's settings, and their file
 src/sky.rs       the .bck sky and horizon
 src/hud.rs       speedometer and minimap
 src/theme.rs     the ui skin: the MIDlet's palette over macroquad's widgets
@@ -222,6 +225,31 @@ without `features = ["audio"]` the audio module is a stub whose
 `load_sound_from_bytes` succeeds and plays nothing.  This crate enables it, and
 on Linux that pulls in `quad-alsa-sys`, so building needs the ALSA headers.  It
 is worth knowing before blaming your own code for the silence.
+
+## Settings
+
+The OPTIONS screen is the original's settings list, doing the things that still
+mean something on a desktop: **graphics quality** (which gates the mid and high
+detail layers when a track is built), **camera** (behind, far or inside),
+**visibility** (the far plane), **background** (the `.bck` sky or a flat
+colour), **HUD**, **control scheme**, **auto-throttle**, **music** and
+**volume**, and **reset career** behind a confirmation.  Every value is drawn
+with the game's own label for it (`16 LOW`, `19 MEDIUM`, `15 HIGH`, `27 CLASSIC`
+and so on), and every value changes something - a test asserts that each pair of
+states behaves differently, including that the three control schemes really do
+drive with different keys.
+
+The MIDlet keeps settings in a record store called **`KORa_1.1.1`** - the
+version is part of the name, so a stale store is not found rather than misread -
+with record 1 a Java `DataOutputStream` blob of seventeen ints, fifteen
+booleans, four bytes and five strings.  Career progress is a *different* store,
+`KORa_record`, and the online tour uses two more.  A desktop port has no record
+stores, so settings go to `KORA_SETTINGS` and progress to `KORA_SAVE`, both
+plain text.
+
+One option is deliberately absent: the player name (`101 YOUR NAME:`).  The
+MIDlet uploads it with a leaderboard entry; the port has no leaderboard, so a
+stored name would be the one setting that changed nothing.
 
 ## Labels
 

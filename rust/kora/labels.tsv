@@ -65,3 +65,35 @@ hud_lap_best	LAP {}  BEST {}	-
 no_time	--:--	-
 race_needs	{} NEEDS {} POINTS	-
 load_failed	COULD NOT LOAD {}	-
+options	OPTIONS	2
+graphics	GRAPHICS	4
+controls	CONTROLS	24
+sound	SOUND	49
+quality	GRAPHICS QUALITY	235
+low	LOW	16
+medium	MEDIUM	19
+high	HIGH	15
+visibility	VISIBILITY	9
+near	NEAR	20
+far	FAR	18
+background	BACKGROUND	10
+hud	HUD	13
+camera	CAMERA	14
+camera_behind	BEHIND CAR	214
+camera_far	FAR CAMERA	22
+camera_inside	INSIDE CAR	21
+scheme	CONTROL SCHEME	25
+scheme_classic	CLASSIC	27
+scheme_left	LEFT-HANDED	28
+scheme_right	RIGHT-HANDED	29
+auto_throttle	AUTO-THROTTLE	26
+music	MUSIC	197
+volume	VOLUME	50
+on	ON	41
+off	OFF	42
+reset_career	RESET CAREER	99
+sure	ARE YOU SURE?	105
+yes	YES	103
+no	NO	104
+main_menu	MAIN MENU	159
+reset_complete	CAREER RESET	99

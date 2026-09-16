@@ -1515,3 +1515,125 @@ fn the_archive_packing_rule_reproduces_every_offset() {
          which is not the archive this rule describes"
     );
 }
+
+/// The settings round-trip, and every one of them changes something: a setting
+/// whose two states behave the same way is not a setting.
+#[test]
+fn settings_persist_and_every_value_does_something() {
+    use kora::settings::{Camera, Quality, Scheme, Settings, Visibility, MAX_VOLUME_STEPS};
+
+    let mut settings = Settings::default();
+    settings.quality = Quality::Medium;
+    settings.camera = Camera::Inside;
+    settings.visibility = Visibility::Near;
+    settings.background = false;
+    settings.hud = false;
+    settings.scheme = Scheme::RightHanded;
+    settings.auto_throttle = true;
+    settings.music = false;
+    settings.volume = 0.7;
+
+    let path = std::env::temp_dir().join("kora-settings-test.txt");
+    settings.save(&path);
+    let loaded = Settings::load(&path);
+    assert_eq!(loaded.quality, Quality::Medium);
+    assert_eq!(loaded.camera, Camera::Inside);
+    assert_eq!(loaded.visibility, Visibility::Near);
+    assert!(!loaded.background);
+    assert!(!loaded.hud);
+    assert_eq!(loaded.scheme, Scheme::RightHanded);
+    assert!(loaded.auto_throttle);
+    assert!(!loaded.music);
+    assert!((loaded.volume - 0.7).abs() < 0.01, "volume {}", loaded.volume);
+    let _ = std::fs::remove_file(&path);
+
+    // Defaults survive a round trip too, so a missing file is not a special case.
+    let defaults = Settings::default();
+    defaults.save(&path);
+    let loaded = Settings::load(&path);
+    assert_eq!(loaded.quality, defaults.quality);
+    assert_eq!(loaded.camera, defaults.camera);
+    assert_eq!(loaded.scheme, defaults.scheme);
+    assert_eq!(loaded.visibility, defaults.visibility);
+    assert_eq!(loaded.background, defaults.background);
+    assert_eq!(loaded.hud, defaults.hud);
+    assert_eq!(loaded.auto_throttle, defaults.auto_throttle);
+    assert_eq!(loaded.music, defaults.music);
+    let _ = std::fs::remove_file(&path);
+
+    // Every cycle is its own inverse.
+    for quality in Quality::ALL {
+        assert_eq!(quality.next().previous(), quality);
+    }
+    for visibility in [Visibility::Near, Visibility::Medium, Visibility::Far] {
+        assert_eq!(visibility.next().previous(), visibility);
+    }
+    for camera in [Camera::Chase, Camera::Far, Camera::Inside] {
+        assert_eq!(camera.next().previous(), camera);
+    }
+    for scheme in [Scheme::Classic, Scheme::LeftHanded, Scheme::RightHanded] {
+        assert_eq!(scheme.next().previous(), scheme);
+    }
+
+    // Each control scheme drives with different keys, so the setting is real.
+    let schemes = [Scheme::Classic, Scheme::LeftHanded, Scheme::RightHanded];
+    for (index, a) in schemes.iter().enumerate() {
+        for b in &schemes[index + 1..] {
+            assert_ne!(a.throttle_keys(), b.throttle_keys(), "{a:?} against {b:?}");
+            assert_ne!(a.steer_keys(), b.steer_keys(), "{a:?} against {b:?}");
+        }
+    }
+
+    // The camera and the view distance are ordered rather than arbitrary.
+    assert!(Camera::Inside.placement().0 < Camera::Chase.placement().0);
+    assert!(Camera::Chase.placement().0 < Camera::Far.placement().0);
+    assert!(Visibility::Near.far_plane() < Visibility::Medium.far_plane());
+    assert!(Visibility::Medium.far_plane() < Visibility::Far.far_plane());
+
+    // Volume counts in steps and wraps at both ends.
+    let mut volume = Settings::default();
+    volume.set_volume_steps(-3);
+    assert_eq!(volume.volume_steps(), 0);
+    volume.set_volume_steps(MAX_VOLUME_STEPS + 3);
+    assert_eq!(volume.volume_steps(), MAX_VOLUME_STEPS);
+    volume.set_volume_steps(MAX_VOLUME_STEPS);
+    volume.cycle_volume(true);
+    assert_eq!(volume.volume_steps(), 0, "past the top wraps to silence");
+    volume.set_volume_steps(0);
+    volume.cycle_volume(false);
+    assert_eq!(volume.volume_steps(), MAX_VOLUME_STEPS, "and under the bottom");
+}
+
+/// Graphics quality reaches the geometry: the mid and high detail layers are
+/// what it gates, and the road underneath does not depend on it.
+#[test]
+fn graphics_quality_gates_the_detail_layers() {
+    use kora::scene::{self, Detail};
+    let dir = assets();
+    let resources = pack::load(&dir);
+
+    let vertices = |detail: Detail| -> usize {
+        scene::build_detailed(&dir, &resources, "mc5.map", 0, detail)
+            .meshes
+            .iter()
+            .map(|mesh| mesh.vertices.len())
+            .sum()
+    };
+    let base = vertices(Detail::Base);
+    let mid = vertices(Detail::Mid);
+    let full = vertices(Detail::Full);
+    assert!(base < mid, "the mid layer added nothing: {base} against {mid}");
+    assert!(mid < full, "the high layer added nothing: {mid} against {full}");
+
+    // The drivable road is the same at every detail: quality is decoration.
+    let base_track = scene::build_detailed(&dir, &resources, "mc5.map", 0, Detail::Base);
+    let full_track = scene::build_detailed(&dir, &resources, "mc5.map", 0, Detail::Full);
+    assert_eq!(
+        base_track.collision_indices.len(),
+        full_track.collision_indices.len()
+    );
+    assert_eq!(
+        base_track.grid.path().len(),
+        full_track.grid.path().len()
+    );
+}

@@ -24,6 +24,18 @@ use crate::format;
 use crate::grid::Grid;
 use crate::pack::{self, Resources};
 
+/// How much of a track to build, which is what the MIDlet's graphics detail
+/// setting (`al.d()`) controls.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Detail {
+    /// Base tiles only.
+    Base,
+    /// Tiles and the mid-detail layer (`md_list`).
+    Mid,
+    /// Everything, including the high-detail layer (`hd_list` + `ol`).
+    Full,
+}
+
 /// World size of one tile (`ar.c` in the MIDlet).
 pub const TILE: f32 = 14.0;
 /// Static node scale the game applies to tile/detail/object models (`ar.a`).
@@ -296,6 +308,19 @@ pub fn build(dir: &Path, res: &Resources, map_name: &str) -> Track {
 
 /// Build a track with a specific tile/texture variant (the campaign's `theme`).
 pub fn build_themed(dir: &Path, res: &Resources, map_name: &str, theme: u8) -> Track {
+    build_detailed(dir, res, map_name, theme, Detail::Full)
+}
+
+/// Build a track at a graphics detail: `Detail::Base` skips the mid-detail
+/// layer and `Detail::Mid` skips the high-detail one, which is what the
+/// MIDlet's detail setting does.
+pub fn build_detailed(
+    dir: &Path,
+    res: &Resources,
+    map_name: &str,
+    theme: u8,
+    detail: Detail,
+) -> Track {
     let tile_list = pack::lines(&pack::read_jar_file(dir, "lists/tile_list"));
     let md_list = pack::lines(&pack::read_jar_file(dir, "lists/md_list"));
     let hd_list = pack::lines(&pack::read_jar_file(dir, "lists/hd_list"));
@@ -350,6 +375,9 @@ pub fn build_themed(dir: &Path, res: &Resources, map_name: &str, theme: u8) -> T
             }
 
             for &(kind, arg) in &cell.mid {
+                if detail == Detail::Base {
+                    continue;
+                }
                 let kind = themed_detail(theme, kind);
                 if kind == 0 {
                     continue;
@@ -376,6 +404,9 @@ pub fn build_themed(dir: &Path, res: &Resources, map_name: &str, theme: u8) -> T
             }
 
             for &(kind, arg) in &cell.high {
+                if detail != Detail::Full {
+                    continue;
+                }
                 let kind = themed_detail(theme, kind);
                 if kind == 0 {
                     continue;
