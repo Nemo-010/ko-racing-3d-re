@@ -223,7 +223,14 @@ impl Repeat {
             }
         }
         let texture = Texture2D::from_rgba8(tw as u16, th as u16, &bytes);
-        texture.set_filter(FilterMode::Linear);
+        // `FILTER_NEAREST`, which is what the game asks for: `cf.a(string,
+        // al.d, ...)` passes `al.d`, and `al.d` is 210.  This matters far more
+        // than it looks - the atlas is a patchwork of unrelated artwork, so
+        // *linear* filtering bleeds the neighbouring tile's art into every
+        // texel at the edges, which reads as grass growing over the road and as
+        // the road's own paint landing beside it.  Nearest keeps every texel
+        // its own.
+        texture.set_filter(FilterMode::Nearest);
         Some(Repeat { texture, tiling })
     }
 
@@ -917,7 +924,11 @@ pub fn load_car_texture(res: &Resources, geometry: &mut CarGeometry) -> Option<T
         Some(ImageFormat::Png),
     )
     .ok()?;
+    // The car sheet is an unwrap whose parts sit edge to edge, so it wants the
+    // same nearest filtering the game asks for - linear bleeds one panel's
+    // paint into the next along every seam.
     let repeat = Repeat::build(&image, geometry.uv_bounds)?;
+    repeat.texture.set_filter(FilterMode::Nearest);
     for vertex in geometry.vertices.iter_mut() {
         vertex.uv = repeat.tiling().map(vertex.uv);
     }
