@@ -25,7 +25,7 @@ use kora::progress::{self, Progress};
 use kora::race::Race;
 use kora::text;
 use kora::settings::Settings;
-use kora::{format, hud, menu, music, pack, scene, sky, theme};
+use kora::{format, hud, menu, music, pack, paths, scene, sky, theme};
 
 fn assets_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("KORA_ASSETS") {
@@ -472,10 +472,12 @@ async fn main() {
         quick.len()
     );
 
-    let settings_path = PathBuf::from(
-        std::env::var("KORA_SETTINGS").unwrap_or_else(|_| "kora-settings.txt".to_string()),
-    );
+    let settings_path = match std::env::var("KORA_SETTINGS") {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => paths::file(paths::Dir::Config, "settings.txt"),
+    };
     let mut settings = Settings::load(&settings_path);
+    println!("settings: {}", settings_path.display());
 
     // The one sound the game ships is a MIDI file at the JAR root, not in the
     // resource pack, so `setup.sh` puts it beside the pack.  macroquad cannot
@@ -516,10 +518,12 @@ async fn main() {
 
     let theme = theme::build();
 
-    let save_path = PathBuf::from(
-        std::env::var("KORA_SAVE").unwrap_or_else(|_| "kora-save.txt".to_string()),
-    );
+    let save_path = match std::env::var("KORA_SAVE") {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => paths::file(paths::Dir::Data, "save.txt"),
+    };
     let mut progress = Progress::load(&save_path);
+    println!("progress: {}", save_path.display());
     if let Ok(name) = std::env::var("KORA_CAR") {
         if let Some(index) = cars.iter().position(|car| format!("cars/{}", car.file) == name) {
             progress.car = index;

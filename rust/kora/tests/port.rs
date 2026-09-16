@@ -1637,3 +1637,97 @@ fn graphics_quality_gates_the_detail_layers() {
         full_track.grid.path().len()
     );
 }
+
+/// Where files go, on every platform this can be checked from.
+///
+/// The rules are a value rather than a `cfg`, so the XDG, macOS, Windows and
+/// Android answers are all exercised here even though only one of them is the
+/// machine running the test.
+#[test]
+fn file_locations_follow_each_platforms_rules() {
+    use kora::paths::{self, Dir, Target};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    let env = |pairs: &[(&str, &str)]| {
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        move |name: &str| map.get(name).cloned()
+    };
+
+    // XDG on unix, with the spec's own fallbacks.
+    let none = env(&[("HOME", "/home/player")]);
+    assert_eq!(
+        paths::resolve(Dir::Config, Target::Unix, &none),
+        Some(PathBuf::from("/home/player/.config/kora"))
+    );
+    assert_eq!(
+        paths::resolve(Dir::Data, Target::Unix, &none),
+        Some(PathBuf::from("/home/player/.local/share/kora"))
+    );
+    let xdg = env(&[
+        ("HOME", "/home/player"),
+        ("XDG_CONFIG_HOME", "/xdg/config"),
+        ("XDG_DATA_HOME", "/xdg/data"),
+    ]);
+    assert_eq!(
+        paths::resolve(Dir::Config, Target::Unix, &xdg),
+        Some(PathBuf::from("/xdg/config/kora"))
+    );
+    assert_eq!(
+        paths::resolve(Dir::Data, Target::Unix, &xdg),
+        Some(PathBuf::from("/xdg/data/kora"))
+    );
+
+    // An empty variable means unset, as the XDG spec says.
+    let empty = env(&[("HOME", "/home/player"), ("XDG_DATA_HOME", ""), ("XDG_CONFIG_HOME", "")]);
+    assert_eq!(
+        paths::resolve(Dir::Data, Target::Unix, &empty),
+        Some(PathBuf::from("/home/player/.local/share/kora"))
+    );
+
+    // An explicit directory wins over all of it, on every platform.
+    for target in [Target::Unix, Target::MacOs, Target::Windows, Target::Android] {
+        let pinned = env(&[
+            ("HOME", "/home/player"),
+            ("APPDATA", "/appdata"),
+            ("XDG_DATA_HOME", "/xdg/data"),
+            ("KORA_DATA_DIR", "/pinned/data"),
+        ]);
+        assert_eq!(
+            paths::resolve(Dir::Data, target, &pinned),
+            Some(PathBuf::from("/pinned/data")),
+            "{target:?} ignored KORA_DATA_DIR"
+        );
+    }
+
+    assert_eq!(
+        paths::resolve(Dir::Data, Target::MacOs, &none),
+        Some(PathBuf::from("/home/player/Library/Application Support/kora"))
+    );
+    assert_eq!(
+        paths::resolve(
+            Dir::Data,
+            Target::Windows,
+            &env(&[("APPDATA", "C:/Users/player/AppData/Roaming")])
+        ),
+        Some(PathBuf::from("C:/Users/player/AppData/Roaming/kora"))
+    );
+
+    // No HOME and no override: nothing to resolve to, rather than a guess.
+    assert_eq!(paths::resolve(Dir::Config, Target::Unix, &env(&[])), None);
+    assert_eq!(paths::resolve(Dir::Data, Target::Windows, &env(&[])), None);
+
+    // The web has no filesystem, so persistence there is not a path at all.
+    assert_eq!(paths::resolve(Dir::Data, Target::Web, &none), None);
+
+    // Android is the case worth knowing about: it is a private directory per
+    // package, and it is not derivable from the environment.
+    assert_eq!(
+        paths::resolve(Dir::Data, Target::Android, &none),
+        None,
+        "a host cannot work out an Android package's private directory"
+    );
+}

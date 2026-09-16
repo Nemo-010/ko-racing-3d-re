@@ -30,8 +30,10 @@ cargo test --release                     # headless checks
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `KORA_ASSETS` | `assets` | directory holding `data`, `data.*` and `lists/` |
-| `KORA_SAVE` | `kora-save.txt` | where points, best times and the chosen car are kept |
-| `KORA_SETTINGS` | `kora-settings.txt` | where the options screen's settings are kept |
+| `KORA_SAVE` | per-user data dir | file for points, best times and the chosen car |
+| `KORA_SETTINGS` | per-user config dir | file for the options screen's settings |
+| `KORA_DATA_DIR` | per-user data dir | overrides where the data directory is |
+| `KORA_CONFIG_DIR` | per-user config dir | overrides where the config directory is |
 | `KORA_MUSIC` | unset | set to `0` to start with the music off |
 | `KORA_SKIP_MENU` | unset | set to boot straight into a race |
 | `KORA_MAP` | `1.map` | track for `KORA_SKIP_MENU` (any of the 40) |
@@ -225,6 +227,42 @@ without `features = ["audio"]` the audio module is a stub whose
 `load_sound_from_bytes` succeeds and plays nothing.  This crate enables it, and
 on Linux that pulls in `quad-alsa-sys`, so building needs the ALSA headers.  It
 is worth knowing before blaming your own code for the silence.
+
+## Where the save and the settings live
+
+`paths.rs` resolves a per-user directory per platform, keeping configuration and
+data apart the way the XDG spec asks:
+
+| platform | settings | save |
+| --- | --- | --- |
+| Linux/BSD | `$XDG_CONFIG_HOME/kora/settings.txt` (`~/.config/kora`) | `$XDG_DATA_HOME/kora/save.txt` (`~/.local/share/kora`) |
+| macOS | `~/Library/Application Support/kora` | same |
+| Windows | `%APPDATA%\kora` | same |
+| Android | `/data/data/<package>/files/kora` | same |
+| web | none - there is no filesystem | none |
+
+An empty XDG variable means unset, as the spec says.  `KORA_SAVE` and
+`KORA_SETTINGS` name the files outright and `KORA_DATA_DIR`/`KORA_CONFIG_DIR`
+the directories, which is how a launcher hands a sandboxed build somewhere it
+may write.  A file already sitting in the working directory wins over all of it,
+so a save that predates the move is not orphaned.
+
+**macroquad does not do any of this**, which is worth knowing before looking for
+the switch.  Its `load_file` is read-only and its "storage" module is an
+in-memory map; there is no writable-path API and no `chdir`.  On Android that
+bites: `load_file` goes through `AAssetManager` for the APK's assets, and a
+relative path from `std::fs` points at the process's working directory, which is
+`/` there and not writable.  An app may only write to its own directory, so
+`paths.rs` works the package name out of `/proc/self/cmdline` and puts the files
+under `/data/data/<package>/files/kora` - dependency-free, but **not verified on
+a device**, only type-checked.  On the web there is no filesystem at all;
+persistence needs `localStorage` or IndexedDB, which is what `quad-storage`
+wraps there (its native backend writes a file relative to the working directory,
+so it has the Android problem too).
+
+Both `cargo check --target aarch64-linux-android` and
+`cargo check --target wasm32-unknown-unknown` pass, so the port at least
+compiles for the three platforms; only the desktop one has been run.
 
 ## Settings
 

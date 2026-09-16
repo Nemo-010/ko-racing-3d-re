@@ -16,6 +16,7 @@ pub mod labels;
 pub mod menu;
 pub mod music;
 pub mod pack;
+pub mod paths;
 pub mod physics;
 pub mod progress;
 pub mod race;

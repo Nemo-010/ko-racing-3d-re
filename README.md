@@ -271,7 +271,8 @@ career event list, quick race, car selection with stat bars, pause and results
 - with the deluxe campaign's 13 extra levels opened by points rather than by the
 original's SMS purchase, career points and per-race best times, a display-only
 showroom, the `.bck` sky, a speedometer and minimap, an OPTIONS screen whose
-settings persist, menus built from macroquad's own UI toolkit and skinned to
+settings persist in the XDG directories (or beside the executable, or wherever
+`KORA_SAVE` points), menus built from macroquad's own UI toolkit and skinned to
 the original's palette (so they take a pointer as well as a keyboard), and no
 garage or medals,
 because the original has none.  No paywall and no network code of
