@@ -22,3 +22,4 @@ pub mod race;
 pub mod scene;
 pub mod sky;
 pub mod text;
+pub mod theme;

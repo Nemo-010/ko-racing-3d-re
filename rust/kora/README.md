@@ -143,6 +143,7 @@ src/ai.rs        opponent driving
 src/race.rs      laps, checkpoints and timing
 src/sky.rs       the .bck sky and horizon
 src/hud.rs       speedometer and minimap
+src/theme.rs     the ui skin: the MIDlet's palette over macroquad's widgets
 src/text.rs      text drawing, over macroquad's rasteriser
 src/main.rs      macroquad front-end
 tests/port.rs    headless checks

@@ -1,17 +1,21 @@
-//! Screens: the main menu, the career and quick-race lists, car selection, the
-//! pause menu and the results panel.
+//! Every screen outside the race, built with macroquad's own UI toolkit.
 //!
-//! These are the port's own layout - the MIDlet draws its menus from packed
-//! images and text blobs - but every number on them comes from the game's
-//! tables: the campaign's levels, entry thresholds and awards, and each car's
-//! four stat values from its `.car` file.
+//! The widgets are macroquad's (`root_ui().button`, `Window`, `progress_bar`),
+//! which means the menus take a pointer as well as a keyboard, and the look
+//! comes from the skin in [`crate::theme`] - the MIDlet's own palette of grey
+//! panels, gradient headers and a dark red for the choice under the cursor.
+//!
+//! The exception is the racing HUD in [`crate::hud`], which is a gauge and a
+//! map rather than a menu, and is drawn directly.
 
 use macroquad::prelude::*;
+use macroquad::ui::{hash, root_ui, widgets::Window};
 
 use crate::campaign::RaceEvent;
+use crate::labels::mode_name;
 use crate::labels;
 use crate::progress::{CarInfo, Progress};
-use crate::text;
+use crate::theme::Theme;
 
 /// The main menu, shared with `main` so the cursor and the labels agree.
 /// These are label keys rather than text.
@@ -23,182 +27,304 @@ pub const MAIN_ITEMS: [&str; 5] = [
     "menu_quit",
 ];
 
-pub const BACKDROP: Color = Color::new(0.05, 0.07, 0.12, 1.0);
-const PANEL: Color = Color::new(1.0, 1.0, 1.0, 0.06);
-const HIGHLIGHT: Color = Color::new(0.20, 0.45, 0.85, 0.85);
-const LOCKED: Color = Color::new(0.45, 0.45, 0.50, 1.0);
-const ACCENT: Color = Color::new(1.0, 0.85, 0.2, 1.0);
-
-/// A panel behind a menu so the text stays readable over the sky.
-fn panel(rect: Rect) {
-    draw_rectangle(rect.x, rect.y, rect.w, rect.h, PANEL);
-    draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, Color::new(1.0, 1.0, 1.0, 0.15));
+/// What a screen wants the program to do next.
+pub enum Action {
+    None,
+    /// The item at this index was chosen, by Enter or by a click.
+    Activate(usize),
+    Back,
 }
 
-fn centred(label: &str, y: f32, size: f32, color: Color) {
-    let width = text::width(label, size);
-    text::draw_shadow(label, (screen_width() - width) / 2.0, y, size, color);
+fn centred_window(size: Vec2) -> Vec2 {
+    vec2(
+        (screen_width() - size.x) / 2.0,
+        (screen_height() - size.y) / 2.0,
+    )
 }
 
-pub fn draw_main(progress: &Progress, cursor: usize) {
-    centred(labels::get("kora"), screen_height() * 0.16, 54.0, WHITE);
-    centred(labels::get("port"), screen_height() * 0.16 + 62.0, 22.0, ACCENT);
-    centred(
-        &labels::format("career_points", &[&progress.points.to_string()]),
-        screen_height() * 0.16 + 92.0,
-        19.0,
-        LOCKED,
-    );
-
-    let items = MAIN_ITEMS;
-    let row = 34.0;
-    let top = screen_height() * 0.42;
-    let width = 240.0;
-    let left = (screen_width() - width) / 2.0;
-    panel(Rect::new(left - 12.0, top - 14.0, width + 24.0, items.len() as f32 * row + 20.0));
-    for (index, item) in items.iter().enumerate() {
-        let y = top + index as f32 * row;
-        if index == cursor {
-            draw_rectangle(left - 6.0, y - 4.0, width + 12.0, row - 4.0, HIGHLIGHT);
-        }
-        text::draw_shadow(labels::get(item), left + 16.0, y, 24.0, WHITE);
+/// Move the cursor from the keyboard, and let the pointer move it too: a
+/// hovered button becomes the cursor, which is what makes the menus work with
+/// a finger on a phone.
+fn cursor_keys(cursor: &mut usize, length: usize) {
+    if length == 0 {
+        return;
     }
-    centred(labels::get("keys_menu"), screen_height() - 22.0, 17.0, LOCKED);
-}
-
-/// A scrolling list of races, showing the stored best time and greying out
-/// the ones the player's points have not reached.
-pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, title: &str) {
-    centred(title, 12.0, 32.0, WHITE);
-    let row = 26.0;
-    let top = 56.0;
-    let visible = ((screen_height() - top - 40.0) / row) as usize;
-    let first = cursor.saturating_sub(visible.saturating_sub(1) / 2).min(events.len().saturating_sub(visible));
-
-    for (offset, event) in events.iter().skip(first).take(visible).enumerate() {
-        let index = first + offset;
-        let y = top + offset as f32 * row;
-        let open = progress.open(event.threshold);
-        if index == cursor {
-            draw_rectangle(24.0, y - 3.0, screen_width() - 48.0, row - 3.0, HIGHLIGHT);
-        }
-        let color = if open { WHITE } else { LOCKED };
-        text::draw_shadow(&event.name, 32.0, y, 20.0, color);
-        text::draw_shadow(&event.map, 260.0, y, 20.0, color);
-        text::draw_shadow(labels::mode_name(event.mode), 370.0, y, 20.0, LOCKED);
-        text::draw_shadow(&event.laps.to_string(), 500.0, y, 20.0, color);
-        text::draw_shadow(&event.opponents.to_string(), 545.0, y, 20.0, color);
-        if open {
-            let best = progress
-                .best_time(&event.key)
-                .map(format_time)
-                .unwrap_or_else(|| labels::get("no_time").to_string());
-            text::draw_shadow(&best, 590.0, y, 20.0, ACCENT);
-        } else {
-            text::draw_shadow(
-                &labels::format("need_points", &[&event.threshold.to_string()]),
-                590.0,
-                y,
-                20.0,
-                LOCKED,
-            );
-        }
+    if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::Left) {
+        *cursor = (*cursor + length - 1) % length;
     }
-
-    text::draw_shadow(labels::get("col_mode"), 370.0, top - 22.0, 17.0, LOCKED);
-    text::draw_shadow(labels::get("col_laps"), 500.0, top - 22.0, 17.0, LOCKED);
-    text::draw_shadow(labels::get("col_cpu"), 545.0, top - 22.0, 17.0, LOCKED);
-    text::draw_shadow(labels::get("col_best"), 590.0, top - 22.0, 17.0, LOCKED);
-    text::draw_shadow(
-        &labels::format(
-            "events_count",
-            &[
-                &(cursor.min(events.len().saturating_sub(1)) + 1).to_string(),
-                &events.len().to_string(),
-                &progress.points.to_string(),
-            ],
-        ),
-        32.0,
-        screen_height() - 42.0,
-        17.0,
-        LOCKED,
-    );
-    text::draw_shadow(labels::get("keys_events"), 32.0, screen_height() - 20.0, 15.0, LOCKED);
+    if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::Right) {
+        *cursor = (*cursor + 1) % length;
+    }
 }
 
-/// The car list, with the four stat bars `ba.a(car, stat)` feeds the setup
-/// screen.  The right half of the screen is left clear for the showroom, which
-/// `main` draws behind this.
-///
-/// The bars are the only thing the four values are for: there is no garage and
-/// nothing to buy, and the original's own `co` class is not a showroom either -
-/// it never loads a car.
-pub fn draw_cars(cars: &[CarInfo], progress: &Progress, cursor: usize) {
-    centred(labels::get("menu_cars"), 12.0, 30.0, WHITE);
+pub fn format_time(seconds: f32) -> String {
+    let minutes = (seconds / 60.0) as u32;
+    let rest = seconds - minutes as f32 * 60.0;
+    format!("{minutes}:{rest:05.2}")
+}
 
-    let row = 58.0;
-    let top = 74.0;
-    for (index, car) in cars.iter().enumerate() {
-        let y = top + index as f32 * row;
-        let active = index == progress.car;
-        if index == cursor {
-            draw_rectangle(16.0, y - 6.0, screen_width() * 0.44, row - 8.0, HIGHLIGHT);
-        }
-        text::draw_shadow(
-            &car.name,
-            24.0,
-            y,
-            21.0,
-            if active { ACCENT } else { WHITE },
-        );
-        if active {
-            text::draw_shadow(labels::get("in_use"), 214.0, y + 5.0, 13.0, ACCENT);
-        }
-        for (stat, value) in car.stats.iter().enumerate() {
-            let by = y + 20.0 + stat as f32 * 9.0;
-            text::draw_shadow(labels::stat_name(stat), 24.0, by, 11.0, LOCKED);
-            for segment in 0..6u8 {
-                let x = 130.0 + segment as f32 * 11.0;
-                draw_rectangle(
-                    x,
-                    by + 1.0,
-                    9.0,
-                    6.0,
-                    if segment < *value {
-                        Color::new(0.75, 0.80, 0.88, 1.0)
-                    } else {
-                        Color::new(1.0, 1.0, 1.0, 0.12)
-                    },
+pub fn main_menu(theme: &Theme, progress: &Progress, cursor: &mut usize) -> Action {
+    let mut chosen = None;
+    let size = vec2(360.0, 150.0 + MAIN_ITEMS.len() as f32 * 48.0);
+    {
+        let mut ui = root_ui();
+        Window::new(hash!("kora-main"), centred_window(size), size)
+            .label(labels::get("kora"))
+            .movable(false)
+            .close_button(false)
+            .ui(&mut *ui, |ui| {
+                ui.label(None, &labels::format("career_points", &[&progress.points.to_string()]));
+                for (index, key) in MAIN_ITEMS.iter().enumerate() {
+                    let focused = index == *cursor;
+                    if focused {
+                        ui.push_skin(&theme.selected);
+                    }
+                    if ui.button(None, labels::get(key)) {
+                        chosen = Some(index);
+                    }
+                    let hovered = ui.last_item_hovered();
+                    if focused {
+                        ui.pop_skin();
+                    }
+                    if hovered {
+                        *cursor = index;
+                    }
+                }
+            });
+    }
+    cursor_keys(cursor, MAIN_ITEMS.len());
+
+    if let Some(index) = chosen {
+        *cursor = index;
+        return Action::Activate(index);
+    }
+    if is_key_pressed(KeyCode::Enter) {
+        return Action::Activate(*cursor);
+    }
+    if is_key_pressed(KeyCode::Escape) {
+        return Action::Back;
+    }
+    Action::None
+}
+
+/// A scrolling list of races: the game's own mode name, the lap count, the grid
+/// and the stored best time, with anything the career has not opened yet dimmed
+/// and marked with the points it needs.
+pub fn event_list(
+    theme: &Theme,
+    progress: &Progress,
+    events: &[RaceEvent],
+    cursor: &mut usize,
+    title: &str,
+) -> Action {
+    if events.is_empty() {
+        return Action::Back;
+    }
+    *cursor = (*cursor).min(events.len() - 1);
+
+    const VISIBLE: usize = 12;
+    let first = (*cursor)
+        .saturating_sub(VISIBLE / 2)
+        .min(events.len().saturating_sub(VISIBLE));
+    let size = vec2(620.0, 190.0 + VISIBLE.min(events.len()) as f32 * 40.0);
+    let mut chosen = None;
+
+    {
+        let mut ui = root_ui();
+        Window::new(hash!("kora-events"), centred_window(size), size)
+            .label(title)
+            .movable(false)
+            .close_button(false)
+            .ui(&mut *ui, |ui| {
+                ui.label(
+                    None,
+                    &labels::format(
+                        "events_count",
+                        &[
+                            &(*cursor + 1).to_string(),
+                            &events.len().to_string(),
+                            &progress.points.to_string(),
+                        ],
+                    ),
                 );
-            }
-        }
-    }
+                for (offset, event) in events.iter().skip(first).take(VISIBLE).enumerate() {
+                    let index = first + offset;
+                    let open = progress.open(event.threshold);
+                    let best = progress
+                        .best_time(&event.key)
+                        .map(format_time)
+                        .unwrap_or_else(|| labels::get("no_time").to_string());
+                    let right = if open {
+                        best
+                    } else {
+                        labels::format("need_points", &[&event.threshold.to_string()])
+                    };
+                    let row = format!(
+                        "{:<16} {:<10} {:<12} {:<2} {:<2} {}",
+                        event.name,
+                        event.map,
+                        mode_name(event.mode),
+                        event.laps,
+                        event.opponents,
+                        right
+                    );
 
-    text::draw_shadow(labels::get("keys_cars"), 24.0, screen_height() - 22.0, 15.0, LOCKED);
+                    let focused = index == *cursor;
+                    if focused {
+                        ui.push_skin(&theme.selected);
+                    } else if !open {
+                        ui.push_skin(&theme.locked);
+                    }
+                    if ui.button(None, row.as_str()) {
+                        chosen = Some(index);
+                    }
+                    let hovered = ui.last_item_hovered();
+                    if focused || !open {
+                        ui.pop_skin();
+                    }
+                    if hovered {
+                        *cursor = index;
+                    }
+                }
+            });
+    }
+    cursor_keys(cursor, events.len());
+
+    if let Some(index) = chosen {
+        *cursor = index;
+        return Action::Activate(index);
+    }
+    if is_key_pressed(KeyCode::Enter) {
+        return Action::Activate(*cursor);
+    }
+    if is_key_pressed(KeyCode::Escape) {
+        return Action::Back;
+    }
+    Action::None
 }
 
-pub fn draw_pause(cursor: usize, music: Option<bool>) {
-    let items = ["pause_resume", "pause_restart", "pause_quit"];
-    let width = 260.0;
-    let left = (screen_width() - width) / 2.0;
-    let top = screen_height() * 0.4;
-    panel(Rect::new(left - 12.0, top - 30.0, width + 24.0, items.len() as f32 * 34.0 + 56.0));
-    centred(labels::get("pause_title"), top - 44.0, 32.0, WHITE);
-    for (index, item) in items.iter().enumerate() {
-        let y = top + index as f32 * 34.0;
-        if index == cursor {
-            draw_rectangle(left - 6.0, y - 4.0, width + 12.0, 30.0, HIGHLIGHT);
-        }
-        text::draw_shadow(labels::get(item), left + 16.0, y, 24.0, WHITE);
+/// Car selection, with the four values `ba.a(car, stat)` feeds as bars.  The
+/// showroom behind it is drawn by `main`; there is nothing to buy.
+pub fn car_list(theme: &Theme, cars: &[CarInfo], progress: &Progress, cursor: &mut usize) -> Action {
+    if cars.is_empty() {
+        return Action::Back;
     }
-    if let Some(playing) = music {
-        centred(
-            labels::get(if playing { "music_on" } else { "music_off" }),
-            top + items.len() as f32 * 34.0 + 16.0,
-            18.0,
-            LOCKED,
-        );
+    *cursor = (*cursor).min(cars.len() - 1);
+    let mut chosen = None;
+
+    let size = vec2(300.0, 90.0 + cars.len() as f32 * 46.0);
+    {
+        let mut ui = root_ui();
+        Window::new(hash!("kora-cars"), vec2(24.0, 60.0), size)
+            .label(labels::get("menu_cars"))
+            .movable(false)
+            .close_button(false)
+            .ui(&mut *ui, |ui| {
+                for (index, car) in cars.iter().enumerate() {
+                    let focused = index == *cursor;
+                    let active = index == progress.car;
+                    let text = if active {
+                        format!("{}  ({})", car.name, labels::get("in_use"))
+                    } else {
+                        car.name.clone()
+                    };
+                    if focused {
+                        ui.push_skin(&theme.selected);
+                    }
+                    if ui.button(None, text.as_str()) {
+                        chosen = Some(index);
+                    }
+                    let hovered = ui.last_item_hovered();
+                    if focused {
+                        ui.pop_skin();
+                    }
+                    if hovered {
+                        *cursor = index;
+                    }
+                }
+            });
     }
+
+    // The bars for the car under the cursor, as macroquad progress bars.
+    let stats_size = vec2(300.0, 190.0);
+    let stats_position = vec2(24.0, 110.0 + cars.len() as f32 * 46.0 + 20.0);
+    if stats_position.y + stats_size.y < screen_height() - 20.0 {
+        let mut ui = root_ui();
+        let car = &cars[*cursor];
+        Window::new(hash!("kora-stats"), stats_position, stats_size)
+            .label(&car.name)
+            .movable(false)
+            .close_button(false)
+            .ui(&mut *ui, |ui| {
+                for (stat, value) in car.stats.iter().enumerate() {
+                    ui.progress_bar(labels::stat_name(stat), *value as f32 / 6.0);
+                }
+            });
+    }
+
+    cursor_keys(cursor, cars.len());
+
+    if let Some(index) = chosen {
+        *cursor = index;
+        return Action::Activate(index);
+    }
+    if is_key_pressed(KeyCode::Enter) {
+        return Action::Activate(*cursor);
+    }
+    if is_key_pressed(KeyCode::Escape) {
+        return Action::Back;
+    }
+    Action::None
+}
+
+pub fn pause_menu(theme: &Theme, cursor: &mut usize, music: Option<bool>) -> Action {
+    const ITEMS: [&str; 3] = ["pause_resume", "pause_restart", "pause_quit"];
+    let mut chosen = None;
+    let size = vec2(320.0, 190.0);
+    {
+        let mut ui = root_ui();
+        Window::new(hash!("kora-pause"), centred_window(size), size)
+            .label(labels::get("pause_title"))
+            .movable(false)
+            .close_button(false)
+            .ui(&mut *ui, |ui| {
+                for (index, key) in ITEMS.iter().enumerate() {
+                    let focused = index == *cursor;
+                    if focused {
+                        ui.push_skin(&theme.selected);
+                    }
+                    if ui.button(None, labels::get(key)) {
+                        chosen = Some(index);
+                    }
+                    let hovered = ui.last_item_hovered();
+                    if focused {
+                        ui.pop_skin();
+                    }
+                    if hovered {
+                        *cursor = index;
+                    }
+                }
+                if let Some(playing) = music {
+                    ui.label(
+                        None,
+                        labels::get(if playing { "music_on" } else { "music_off" }),
+                    );
+                }
+            });
+    }
+    cursor_keys(cursor, ITEMS.len());
+
+    if let Some(index) = chosen {
+        *cursor = index;
+        return Action::Activate(index);
+    }
+    if is_key_pressed(KeyCode::Enter) {
+        return Action::Activate(*cursor);
+    }
+    if is_key_pressed(KeyCode::Escape) {
+        return Action::Activate(0);
+    }
+    Action::None
 }
 
 #[derive(Clone)]
@@ -214,32 +340,13 @@ pub struct Outcome {
     pub previous_best: Option<f32>,
 }
 
-pub fn draw_results(event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
-    let width = 460.0;
-    let left = (screen_width() - width) / 2.0;
-    let top = screen_height() * 0.22;
-    panel(Rect::new(left - 12.0, top - 46.0, width + 24.0, 330.0));
-    centred(&event.name, top - 58.0, 34.0, WHITE);
-
-    let line = |index: usize, label: &str, value: &str, color: Color| {
-        let y = top + index as f32 * 32.0;
-        text::draw_shadow(label, left + 20.0, y, 21.0, LOCKED);
-        text::draw_shadow(value, left + width - 20.0 - text::width(value, 21.0), y, 21.0, color);
-    };
-    line(0, labels::get("col_mode"), labels::mode_name(event.mode), LOCKED);
-    line(1, labels::get("results_position"), &format!("{} of {}", outcome.place + 1, outcome.cars),
-         if outcome.place == 0 { GOLD } else { WHITE });
-    line(2, labels::get("results_laps"), &outcome.laps.to_string(), WHITE);
-    line(3, labels::get("results_total"), &format_time(outcome.total_time), WHITE);
-    line(
-        4,
-        labels::get("results_best"),
-        &outcome
-            .best_lap
-            .map(format_time)
-            .unwrap_or_else(|| labels::get("no_time").to_string()),
-        ACCENT,
-    );
+pub fn results(
+    theme: &Theme,
+    event: &RaceEvent,
+    progress: &Progress,
+    outcome: &Outcome,
+) -> Action {
+    let size = vec2(480.0, 340.0);
     let record = match (outcome.improved, outcome.previous_best) {
         (true, Some(previous)) => format!(
             "{}  (was {})",
@@ -250,22 +357,50 @@ pub fn draw_results(event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
         (false, Some(best)) => labels::format("results_record", &[&format_time(best)]),
         (false, None) => labels::get("results_none").to_string(),
     };
-    line(5, labels::get("results_record"), &record, ACCENT);
-    line(
-        6,
-        labels::get("points"),
-        &labels::format(
-            "results_points",
-            &[&outcome.gained.to_string(), &progress.points.to_string()],
+    let lines = [
+        (labels::get("col_mode"), mode_name(event.mode).to_string()),
+        (
+            labels::get("results_position"),
+            format!("{} of {}", outcome.place + 1, outcome.cars),
         ),
-        ACCENT,
-    );
+        (labels::get("results_laps"), outcome.laps.to_string()),
+        (labels::get("results_total"), format_time(outcome.total_time)),
+        (
+            labels::get("results_best"),
+            outcome
+                .best_lap
+                .map(format_time)
+                .unwrap_or_else(|| labels::get("no_time").to_string()),
+        ),
+        (labels::get("results_record"), record),
+        (
+            labels::get("points"),
+            labels::format(
+                "results_points",
+                &[&outcome.gained.to_string(), &progress.points.to_string()],
+            ),
+        ),
+    ];
 
-    centred(labels::get("results_continue"), top + 250.0, 20.0, LOCKED);
-}
+    let mut chosen = false;
+    {
+        let mut ui = root_ui();
+        Window::new(hash!("kora-results"), centred_window(size), size)
+            .label(&event.name)
+            .movable(false)
+            .close_button(false)
+            .ui(&mut *ui, |ui| {
+                for (label, value) in lines.iter() {
+                    ui.label(None, &format!("{label}  {value}"));
+                }
+                ui.push_skin(&theme.selected);
+                chosen = ui.button(None, labels::get("results_continue"));
+                ui.pop_skin();
+            });
+    }
 
-pub fn format_time(seconds: f32) -> String {
-    let minutes = (seconds / 60.0) as u32;
-    let rest = seconds - minutes as f32 * 60.0;
-    format!("{minutes}:{rest:05.2}")
+    if chosen || is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Escape) {
+        return Action::Activate(0);
+    }
+    Action::None
 }

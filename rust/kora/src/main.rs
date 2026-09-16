@@ -19,12 +19,12 @@ use macroquad::prelude::*;
 use kora::ai::AiDriver;
 use kora::campaign::{self, RaceEvent};
 use kora::labels;
-use kora::menu::{self, Outcome};
+use kora::menu::Outcome;
 use kora::physics::{CarControl, Tuning, World};
 use kora::progress::{self, Progress};
 use kora::race::Race;
 use kora::text;
-use kora::{format, hud, music, pack, scene, sky};
+use kora::{format, hud, menu, music, pack, scene, sky, theme};
 
 /// Background music level.  The MIDlet has its own SOUND and VOLUME settings;
 /// this is the port's default.
@@ -487,6 +487,8 @@ async fn main() {
         }
     }
 
+    let theme = theme::build();
+
     let save_path = PathBuf::from(
         std::env::var("KORA_SAVE").unwrap_or_else(|_| "kora-save.txt".to_string()),
     );
@@ -526,7 +528,7 @@ async fn main() {
 
     loop {
         let dt = get_frame_time().min(0.05);
-        clear_background(menu::BACKDROP);
+        clear_background(theme::BACKDROP);
 
         if let Some(track) = &track {
             if is_key_pressed(KeyCode::M) {
@@ -550,20 +552,10 @@ async fn main() {
 
         match screen {
             Screen::Main => {
-                menu::draw_main(&progress, cursor);
-                if !message.is_empty() {
-                    text::draw_shadow(&message, 16.0, screen_height() - 44.0, 19.0, WHITE);
-                }
-                let items = menu::MAIN_ITEMS.len();
-                if is_key_pressed(KeyCode::Up) {
-                    cursor = (cursor + items - 1) % items;
-                }
-                if is_key_pressed(KeyCode::Down) {
-                    cursor = (cursor + 1) % items;
-                }
-                if is_key_pressed(KeyCode::Enter) {
+                if let menu::Action::Activate(choice) = menu::main_menu(&theme, &progress, &mut cursor)
+                {
                     message.clear();
-                    match cursor {
+                    match choice {
                         0 => {
                             cursor = 0;
                             screen = Screen::Career;
@@ -583,48 +575,49 @@ async fn main() {
                         _ => break,
                     }
                 }
+                if !message.is_empty() {
+                    text::draw_shadow(&message, 16.0, 12.0, 19.0, WHITE);
+                }
             }
 
             Screen::Career | Screen::Deluxe | Screen::Quick => {
                 let (events, title) = match screen {
-                    Screen::Career => (&career, "CAREER"),
-                    Screen::Deluxe => (&deluxe, "DELUXE"),
-                    _ => (&quick, "QUICK RACE"),
+                    Screen::Career => (&career, labels::get("menu_career")),
+                    Screen::Deluxe => (&deluxe, labels::get("menu_deluxe")),
+                    _ => (&quick, labels::get("menu_quick")),
                 };
                 if events.is_empty() {
                     screen = Screen::Main;
                 } else {
-                    cursor = cursor.min(events.len() - 1);
-                    menu::draw_events(&progress, events, cursor, title);
-                    if is_key_pressed(KeyCode::Up) {
-                        cursor = cursor.saturating_sub(1);
-                    }
-                    if is_key_pressed(KeyCode::Down) {
-                        cursor = (cursor + 1).min(events.len() - 1);
-                    }
-                    if is_key_pressed(KeyCode::Escape) {
-                        cursor = 0;
-                        screen = Screen::Main;
-                    }
-                    if is_key_pressed(KeyCode::Enter) {
-                        let event = events[cursor].clone();
-                        if !progress.open(event.threshold) {
-                            message = labels::format(
-                                "race_needs",
-                                &[&event.name.to_uppercase(), &event.threshold.to_string()],
-                            );
-                        } else {
-                            let file = cars
-                                .get(progress.car)
-                                .map(|car| car.file.clone())
-                                .unwrap_or_else(|| "rally.car".to_string());
-                            running = start_race(&resources, &dir, &event, &file, screen);
-                            if running.is_some() {
-                                screen = Screen::Race;
+                    match menu::event_list(&theme, &progress, events, &mut cursor, title) {
+                        menu::Action::Activate(index) => {
+                            let event = events[index].clone();
+                            if !progress.open(event.threshold) {
+                                message = labels::format(
+                                    "race_needs",
+                                    &[&event.name.to_uppercase(), &event.threshold.to_string()],
+                                );
                             } else {
-                                message = labels::format("load_failed", &[&event.map.to_uppercase()]);
+                                let file = cars
+                                    .get(progress.car)
+                                    .map(|car| car.file.clone())
+                                    .unwrap_or_else(|| "rally.car".to_string());
+                                running = start_race(&resources, &dir, &event, &file, screen);
+                                if running.is_some() {
+                                    screen = Screen::Race;
+                                } else {
+                                    message = labels::format(
+                                        "load_failed",
+                                        &[&event.map.to_uppercase()],
+                                    );
+                                }
                             }
                         }
+                        menu::Action::Back => {
+                            cursor = 0;
+                            screen = Screen::Main;
+                        }
+                        menu::Action::None => {}
                     }
                 }
             }
@@ -640,23 +633,19 @@ async fn main() {
                     if let Some((geometry, texture)) = showroom.get(cursor) {
                         draw_showroom(geometry, texture, showroom_spin);
                     }
-                    menu::draw_cars(&cars, &progress, cursor);
-                    if is_key_pressed(KeyCode::Up) {
-                        cursor = cursor.saturating_sub(1);
-                    }
-                    if is_key_pressed(KeyCode::Down) {
-                        cursor = (cursor + 1).min(cars.len() - 1);
-                    }
-                    if is_key_pressed(KeyCode::Escape) {
-                        cursor = 0;
-                        screen = Screen::Main;
-                    }
-                    if is_key_pressed(KeyCode::Enter) {
-                        progress.car = cursor;
-                        progress.save(&save_path);
-                        message = labels::format("car_selected", &[&cars[cursor].name]);
-                        cursor = 0;
-                        screen = Screen::Main;
+                    match menu::car_list(&theme, &cars, &progress, &mut cursor) {
+                        menu::Action::Activate(index) => {
+                            progress.car = index;
+                            progress.save(&save_path);
+                            message = labels::format("car_selected", &[&cars[index].name]);
+                            cursor = 0;
+                            screen = Screen::Main;
+                        }
+                        menu::Action::Back => {
+                            cursor = 0;
+                            screen = Screen::Main;
+                        }
+                        menu::Action::None => {}
                     }
                 }
             }
@@ -693,49 +682,40 @@ async fn main() {
             }
 
             Screen::Paused => {
-                clear_background(menu::BACKDROP);
-                menu::draw_pause(cursor, track.as_ref().map(|_| music_playing));
-                if is_key_pressed(KeyCode::Up) {
-                    cursor = (cursor + 2) % 3;
-                }
-                if is_key_pressed(KeyCode::Down) {
-                    cursor = (cursor + 1) % 3;
-                }
-                if is_key_pressed(KeyCode::Escape) {
-                    if let Some(run) = running.as_mut() {
-                        let laps = env_number("KORA_LAPS", 99).unwrap_or(run.event.laps).max(1);
-                        run.restart(laps);
-                    }
-                    screen = Screen::Race;
-                }
-                if is_key_pressed(KeyCode::Enter) {
-                    match cursor {
-                        0 => screen = Screen::Race,
-                        1 => {
-                            if let Some(run) = running.as_mut() {
-                                let laps =
-                                    env_number("KORA_LAPS", 99).unwrap_or(run.event.laps).max(1);
-                                run.restart(laps);
-                            }
-                            screen = Screen::Race;
+                let music = track.as_ref().map(|_| music_playing);
+                match menu::pause_menu(&theme, &mut cursor, music) {
+                    menu::Action::Activate(0) => screen = Screen::Race,
+                    menu::Action::Activate(1) => {
+                        if let Some(run) = running.as_mut() {
+                            let laps =
+                                env_number("KORA_LAPS", 99).unwrap_or(run.event.laps).max(1);
+                            run.restart(laps);
                         }
-                        _ => {
-                            running = None;
-                            cursor = 0;
-                            screen = Screen::Main;
-                        }
+                        screen = Screen::Race;
                     }
+                    menu::Action::Activate(_) => {
+                        running = None;
+                        cursor = 0;
+                        screen = Screen::Main;
+                    }
+                    _ => {}
                 }
             }
 
             Screen::Results => {
-                if let Some(run) = running.as_ref() {
-                    menu::draw_results(&run.event, &progress, run.outcome.as_ref().expect("outcome"));
-                }
-                if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Escape) {
+                let action = match running.as_ref() {
+                    Some(run) => menu::results(
+                        &theme,
+                        &run.event,
+                        &progress,
+                        run.outcome.as_ref().expect("an outcome"),
+                    ),
+                    None => menu::Action::Back,
+                };
+                if !matches!(action, menu::Action::None) {
                     let back = running.as_ref().map(|run| run.back).unwrap_or(Screen::Main);
-                    cursor = 0;
                     running = None;
+                    cursor = 0;
                     screen = back;
                 }
             }

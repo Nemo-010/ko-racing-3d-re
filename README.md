@@ -222,7 +222,9 @@ that follow the road; lap, checkpoint and timing rules; and menus - main menu,
 career event list, quick race, car selection with stat bars, pause and results
 - with the deluxe campaign's 13 extra levels opened by points rather than by the
 original's SMS purchase, career points and per-race best times, a display-only
-showroom, the `.bck` sky, a speedometer and minimap, and no garage or medals,
+showroom, the `.bck` sky, a speedometer and minimap, menus built from
+macroquad's own UI toolkit and skinned to the original's palette (so they take
+a pointer as well as a keyboard), and no garage or medals,
 because the original has none.  No paywall and no network code of
 any kind.  On-screen text is set in
 Contrail One (SIL Open Font License, bundled in `rust/kora/fonts/`) and

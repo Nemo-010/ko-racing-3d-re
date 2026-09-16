@@ -35,7 +35,9 @@ static FONT: LazyLock<Option<Font>> = LazyLock::new(|| {
     }
 });
 
-fn face() -> Option<&'static Font> {
+/// The loaded face, for anything that needs to rasterise with it - the UI
+/// toolkit builds its own styles from a `Font`.
+pub fn face() -> Option<&'static Font> {
     FONT.as_ref()
 }
 
