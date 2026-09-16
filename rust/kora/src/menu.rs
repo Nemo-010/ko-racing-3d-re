@@ -303,7 +303,14 @@ pub fn draw_results(event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
     line(
         6,
         labels::get("points"),
-        &labels::format("results_points", &[&outcome.gained.to_string(), &progress.points.to_string()]),
+        &if event.unlocks.is_some() {
+            labels::get("results_unlocks").to_string()
+        } else {
+            labels::format(
+                "results_points",
+                &[&outcome.gained.to_string(), &progress.points.to_string()],
+            )
+        },
         ACCENT,
     );
 

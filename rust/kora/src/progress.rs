@@ -162,16 +162,27 @@ impl Progress {
     }
 
     /// Record a finish.  Returns the medal won and the points it paid.
+    ///
+    /// The MIDlet pays the record's own value once, the first time a race is
+    /// passed, and never again - so that is what this does.  A better medal on
+    /// a race already passed updates the medal and pays nothing, which is what
+    /// stops a race being farmed; and a record whose value is not an award (the
+    /// bonus races, which unlock a group) pays nothing at all.
+    ///
+    /// The medal itself is the port's: the game has no such concept, and its
+    /// stated goal is simply "FINISH FIRST".  Requiring a podium finish is this
+    /// port's reading of the MIDlet's "was the race passed" test.
     pub fn record(&mut self, key: &str, place: usize, award: i32) -> (u8, u32) {
         let medal = medal_for_place(place);
         let previous = self.best(key);
-        if medal <= previous {
-            return (medal, 0);
+        if medal > previous {
+            self.medals.insert(key.to_string(), medal);
         }
-        self.medals.insert(key.to_string(), medal);
-        let gained = (award.max(1) as u32) * (medal - previous) as u32;
-        self.points += gained;
-        (medal, gained)
+        if previous == 0 && medal > 0 && award > 0 {
+            self.points += award as u32;
+            return (medal, award as u32);
+        }
+        (medal, 0)
     }
 }
 

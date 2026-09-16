@@ -77,11 +77,16 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
   a results panel.  Locked events grey out and show the points they need, and
   each event carries the game's own name for its mode (CIRCUIT, RACE, TIME
   CHASE, SURVIVAL, HEAD TO HEAD, SLIDESHOW, SPECIAL).
-* **Career progress** (`progress`) - medals and points.  A race's entry
-  threshold and award come from its `.000` record, the medal from the finishing
-  position (gold, silver, bronze), and a better medal on a race already won
-  only pays the difference so a race cannot be farmed.  Points and the chosen
-  car are saved to `KORA_SAVE`.
+* **Career progress** (`progress`) - points and medals.  A race's entry
+  threshold and award come from its `.000` record: the MIDlet keeps a running
+  total, refuses to offer a race whose gate sits above it, and pays the
+  record's own value once when a race is passed and never again.  A *negative*
+  value is not an award at all - `u.n()` negates it into a group index and
+  unlocks that group - and seven bonus races in `campaign.000` carry one, so
+  the port marks those as unlocks and pays nothing rather than a token point.
+  Medals (gold, silver and bronze for the podium) are the port's own: the game
+  has no medal anywhere in its text, and its stated goal is simply FINISH
+  FIRST.  Points, medals and the chosen car save to `KORA_SAVE`.
 * **Garage** (`progress` + `menu`) - spend career points on any car's four
   values, up to 6, which is the ceiling the game's own best car carries.  Each
   purchase changes what the car is like to drive, and the upgrades are saved
@@ -137,6 +142,7 @@ macroquad context.
 | `medals_and_points_persist` | medal rules, points only for an improvement, save/load |
 | `career_and_quick_lists_are_built` | the 47 career events, the 40 quick-race tracks and the 8 cars |
 | `a_race_runs_to_the_flag_and_scores` | a whole 2-lap race with four AI cars, scored as the results screen does |
+| `bonus_races_unlock_rather_than_award` | the seven negative records are unlocks, pay nothing, and the groups are 1..7 |
 | `the_bundled_font_covers_the_interface` | the bundled face parses, covers every character the UI builds, and rasterises |
 | `the_garage_sells_upgrades_for_career_points` | prices, the ceiling, per-car isolation and the save round trip |
 | `the_deluxe_campaign_opens_on_points_alone` | the 13 deluxe events are extra tracks, opened by points with nothing else consulted |

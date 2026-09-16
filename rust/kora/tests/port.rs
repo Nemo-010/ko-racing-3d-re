@@ -701,26 +701,29 @@ fn medals_and_points_persist() {
     assert!(!progress.open(9), "a 9-point race is not");
 
     let (medal, gained) = progress.record("career:0:0", 1, 1);
-    assert_eq!((medal, gained), (2, 2), "second place is silver, worth two");
-
-    let (medal, gained) = progress.record("career:0:0", 2, 1);
-    assert_eq!((medal, gained), (1, 0), "a worse finish pays nothing");
-    let (medal, gained) = progress.record("career:0:0", 5, 1);
-    assert_eq!((medal, gained), (0, 0), "off the podium wins no medal");
-    assert_eq!(progress.best("career:0:0"), 2, "and keeps the better medal");
+    assert_eq!((medal, gained), (2, 1), "second place pays the record's award");
 
     let (medal, gained) = progress.record("career:0:0", 0, 1);
-    assert_eq!((medal, gained), (3, 1), "gold only pays the difference");
-    assert_eq!(progress.points, 3);
+    assert_eq!((medal, gained), (3, 0), "a better medal later pays nothing");
+    assert_eq!(progress.best("career:0:0"), 3, "but is remembered");
+
+    let (medal, gained) = progress.record("career:0:0", 2, 1);
+    assert_eq!((medal, gained), (1, 0), "a worse finish pays nothing and keeps the medal");
+    assert_eq!(progress.best("career:0:0"), 3);
+
+    // Off the podium is not a pass at all.
+    let (medal, gained) = progress.record("career:1:0", 5, 1);
+    assert_eq!((medal, gained), (0, 0), "no medal, no points");
+    assert_eq!(progress.points, 1, "one race passed, one point");
 
     let path = std::env::temp_dir().join("kora-progress-test.txt");
     progress.car = 2;
     progress.save(&path);
     let loaded = Progress::load(&path);
-    assert_eq!(loaded.points, 3);
+    assert_eq!(loaded.points, 1);
     assert_eq!(loaded.car, 2);
     assert_eq!(loaded.best("career:0:0"), 3);
-    assert!(loaded.open(4) && !loaded.open(5));
+    assert!(loaded.open(2) && !loaded.open(3));
     let _ = std::fs::remove_file(&path);
 }
 
@@ -742,8 +745,16 @@ fn career_and_quick_lists_are_built() {
     assert_eq!(events[0].map, "ma1.map");
     assert_eq!(events[0].mode, 0);
     assert!(
-        events.iter().all(|e| e.laps >= 1 && e.award >= 1 && e.key.contains(':')),
-        "every event needs laps, an award and a save key"
+        events
+            .iter()
+            .all(|e| e.laps >= 1 && e.award >= 0 && e.key.contains(':')),
+        "every event needs laps, a non-negative award and a save key"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|e| e.unlocks.is_some() || e.award > 0),
+        "an event either pays points or unlocks something"
     );
     // Within a level, races come before time trials.
     let mut time_trials = std::collections::HashSet::new();
@@ -852,8 +863,8 @@ fn a_race_runs_to_the_flag_and_scores() {
     assert_eq!(place, 0);
     assert_eq!(medal, medal_for_place(0));
     assert_eq!(medal, 3, "the winner takes gold");
-    assert_eq!(gained, 3);
-    assert_eq!(progress.points, 3);
+    assert_eq!(gained, 1, "and is paid the record's own award, once");
+    assert_eq!(progress.points, 1);
     let race = &races[winner];
     assert!(race.best.is_some() && race.best.unwrap() > 5.0, "laps are timed");
     assert!(race.finish_time.is_some());
@@ -1262,4 +1273,46 @@ fn the_label_table_is_well_formed() {
     assert_eq!(labels::format("hud_lap", &["1", "3"]), "LAP 1/3");
     assert_eq!(labels::format("hud_pos", &["2", "4"]), "POS 2/4");
     assert_eq!(labels::format("results_points", &["3", "12"]), "+3  (total 12)");
+}
+
+/// A race record's third value is signed, and a negative one is an unlock
+/// group rather than an award: `u.n()` negates it and sets that group's
+/// unlocked flag.  The port must not read one as the other.
+#[test]
+fn bonus_races_unlock_rather_than_award() {
+    use kora::campaign;
+    use kora::progress::Progress;
+    let resources = pack::load(&assets());
+    let events = campaign::events(&resources);
+
+    let unlockers: Vec<_> = events.iter().filter(|e| e.unlocks.is_some()).collect();
+    let awarders: Vec<_> = events.iter().filter(|e| e.unlocks.is_none()).collect();
+    assert_eq!(unlockers.len(), 7, "the bonus races in campaign.000");
+    assert_eq!(awarders.len(), 40, "34 campaign plus 13 deluxe, less the seven");
+
+    // Every award is positive and every unlock group is 1..=7.
+    assert!(awarders.iter().all(|e| e.award > 0), "an award must be a gain");
+    let mut groups: Vec<u8> = unlockers.iter().filter_map(|e| e.unlocks).collect();
+    groups.sort_unstable();
+    assert_eq!(groups, vec![1, 2, 3, 4, 5, 6, 7]);
+    assert!(
+        unlockers.iter().all(|e| e.award == 0),
+        "a bonus race must not also pay points"
+    );
+
+    // And a finishing medal on one of them adds nothing.
+    let bonus = unlockers[0];
+    let mut progress = Progress::default();
+    let (medal, gained) = progress.record(&bonus.key, 0, bonus.award);
+    assert_eq!(medal, 3, "still a gold for winning it");
+    assert_eq!(gained, 0, "but it pays no points");
+    assert_eq!(progress.points, 0);
+
+    // Whereas an ordinary race pays the record's own value, once.
+    let ordinary = awarders[0];
+    let (_, gained) = progress.record(&ordinary.key, 0, ordinary.award);
+    assert_eq!(gained, ordinary.award as u32);
+    assert_eq!(progress.points, ordinary.award as u32);
+    let (_, again) = progress.record(&ordinary.key, 0, ordinary.award);
+    assert_eq!(again, 0, "passing the same race twice pays once");
 }

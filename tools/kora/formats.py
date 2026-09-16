@@ -442,7 +442,9 @@ class Campaign:
         count = r.u8()                 # the game stores this + 1
         unlock = [r.u32() for _ in range(count)]
         downloads = [(r.u32(), r.string()) for _ in range(r.u8())]
-        extras = [CampaignTailEntry(r.u8(), r.u8(), (r.u32(), r.u32(), r.u32()))
+        # The three values are signed: a negative third one is an unlock
+        # group, not an award (see `u.n()`), which reading them as u32 hides.
+        extras = [CampaignTailEntry(r.u8(), r.u8(), (r.i32(), r.i32(), r.i32()))
                   for _ in range(r.u8())]
         r.done()
         return cls(levels, unlock, downloads, extras)

@@ -95,7 +95,14 @@ pub struct RaceEvent {
     pub opponents: u32,
     pub theme: u8,
     pub threshold: i32,
+    /// Points the race is worth.  The MIDlet adds `record[3]` to the player's
+    /// total on a win, but a *negative* value is not an award at all: `u.n()`
+    /// negates it into a group index and sets that group's unlocked flag
+    /// instead, which is how the bonus races hand over tracks and cars.  So
+    /// this is the value floored at zero, and [`Self::unlocks`] carries the
+    /// group when there is one.
     pub award: i32,
+    pub unlocks: Option<u8>,
     /// Stable key for saving a medal against this race.
     pub key: String,
 }
@@ -112,7 +119,8 @@ impl RaceEvent {
             opponents: if config.is_race() { config.opponents } else { 3 },
             theme: config.theme,
             threshold: record.values[0],
-            award: record.values[1].max(1),
+            award: record.values[1].max(0),
+            unlocks: (record.values[1] < 0).then(|| (-record.values[1]) as u8),
             key: format!("{table}:{level_index}:{}", record.mode),
         }
     }
@@ -195,6 +203,7 @@ pub fn quick_events(resources: &Resources) -> Vec<RaceEvent> {
                 theme,
                 threshold: 0,
                 award: 1,
+                unlocks: None,
             }
         })
         .collect()
