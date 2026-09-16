@@ -23,7 +23,7 @@ use kora::physics::{CarControl, Tuning, World};
 use kora::progress::{self, Progress};
 use kora::race::Race;
 use kora::text;
-use kora::{format, pack, scene};
+use kora::{format, hud, pack, scene, sky};
 
 fn assets_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("KORA_ASSETS") {
@@ -63,6 +63,7 @@ struct Running {
     event: RaceEvent,
     back: Screen,
     track: scene::Track,
+    sky: Option<sky::Sky>,
     geometry: scene::CarGeometry,
     texture: Option<Texture2D>,
     world: World,
@@ -108,6 +109,8 @@ fn start_race(
 ) -> Option<Running> {
     let mut track = scene::build_themed(dir, resources, &event.map, event.theme);
     track.attach_textures(resources);
+    // The theme byte picks one of the five backgrounds (`al.q(j)`).
+    let sky = sky::Sky::load(resources, event.theme);
 
     let car_def = resources
         .get(&format!("cars/{car_file}"))
@@ -149,6 +152,7 @@ fn start_race(
         event: event.clone(),
         back,
         track,
+        sky,
         geometry,
         texture,
         world,
@@ -274,7 +278,10 @@ impl Running {
         camera.z_far = 4000.0;
         set_camera(&camera);
 
-        clear_background(Color::new(0.53, 0.81, 0.92, 1.0));
+        match &self.sky {
+            Some(sky) => sky.draw(),
+            None => clear_background(Color::new(0.53, 0.81, 0.92, 1.0)),
+        }
         for mesh in &self.track.meshes {
             draw_mesh(mesh);
         }
@@ -345,6 +352,19 @@ impl Running {
             20.0,
             Color::new(0.9, 0.9, 0.9, 1.0),
         );
+
+        let markers: Vec<hud::Marker> = (0..self.world.cars.len())
+            .map(|car| {
+                let (position, rotation) = self.world.pose(car);
+                hud::Marker {
+                    position,
+                    heading: rotation * vec3(0.0, 0.0, -1.0),
+                    player: car == self.player,
+                }
+            })
+            .collect();
+        hud::draw_minimap(&self.track.grid, &markers);
+        hud::draw_speedometer(self.world.speed(self.player));
     }
 }
 

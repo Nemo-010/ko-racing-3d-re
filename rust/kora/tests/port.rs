@@ -1305,3 +1305,90 @@ fn every_car_builds_for_the_showroom() {
         assert!(low < -0.05 && high > 0.05, "{} is not centred: {low}..{high}", car.name);
     }
 }
+
+/// The `.bck` backgrounds: all five parse, and each names an image that is
+/// actually in the pack once the reader's own `.jpg`-then-`.png` rule is
+/// applied.  A theme byte of 0..4 indexes the list, so a missing one would
+/// leave a track with no sky.
+#[test]
+fn the_five_backgrounds_resolve() {
+    use kora::format::Background;
+    use kora::sky;
+    let resources = pack::load(&assets());
+
+    assert_eq!(
+        sky::THEMES,
+        ["clear", "rain", "snow", "desert", "sunset"],
+        "al.a lists them in this order"
+    );
+
+    for theme in 0..5u8 {
+        let name = sky::THEMES[theme as usize];
+        let bytes = resources
+            .get(&format!("back/{name}.bck"))
+            .unwrap_or_else(|| panic!("{name}.bck is missing"));
+        let background = Background::parse(bytes).unwrap_or_else(|| panic!("{name}.bck"));
+        assert_eq!(background.colours.len(), 4);
+        assert!(background.detail <= 4, "{name}: detail {}", background.detail);
+        assert!(background.scale_a > 0.0 && background.scale_b > 0.0);
+
+        // The reader tries the name with .jpg first and falls back to .png.
+        let stem = background
+            .texture
+            .rsplit_once('.')
+            .map_or(background.texture.as_str(), |(stem, _)| stem);
+        let found = format!("images/{stem}.jpg");
+        let fallback = format!("images/{stem}.png");
+        assert!(
+            resources.contains_key(&found) || resources.contains_key(&fallback),
+            "{name} names {} and neither {found} nor {fallback} is in the pack",
+            background.texture
+        );
+    }
+
+    // Spot values, straight from clear.bck.
+    let clear = Background::parse(&resources["back/clear.bck"]).unwrap();
+    assert_eq!(clear.texture, "bc.png");
+    assert_eq!(clear.scale_a, 1.0);
+    assert_eq!(clear.scale_b, 1.0);
+}
+
+/// The minimap has to put every car inside its own panel, on the right cell:
+/// world Z maps to the map's Y the other way round, which is the kind of sign
+/// error that looks fine until you notice the markers are in a mirror.
+#[test]
+fn the_minimap_maps_the_track_the_right_way_up() {
+    use kora::hud;
+    let dir = assets();
+    let resources = pack::load(&dir);
+    let track = scene::build(&dir, &resources, "1.map");
+    let grid = &track.grid;
+
+    let (cell, left, bottom) = hud::minimap_layout(grid, 720.0);
+    let width = grid.width as f32 * cell;
+    let height = grid.height as f32 * cell;
+    let top = bottom - height - 24.0;
+
+    for (x, y) in grid.path() {
+        let point = hud::minimap_point(grid, grid.center(x, y), cell, left, bottom);
+        assert!(
+            point.x >= left - 0.01 && point.x <= left + width + 0.01,
+            "cell ({x},{y}) is off the map horizontally: {}",
+            point.x
+        );
+        assert!(
+            point.y >= top - 0.01 && point.y <= top + height + 0.01,
+            "cell ({x},{y}) is off the map vertically: {}",
+            point.y
+        );
+    }
+
+    // And the mapping is not mirrored.  A cell further along +X is further
+    // right, and one further along +Y - which is -Z in world space - is
+    // further down, so cell row 0 is the top row of the map.
+    let a = hud::minimap_point(grid, grid.center(1, 1), cell, left, bottom);
+    let b = hud::minimap_point(grid, grid.center(2, 1), cell, left, bottom);
+    let c = hud::minimap_point(grid, grid.center(1, 2), cell, left, bottom);
+    assert!(b.x > a.x && (b.y - a.y).abs() < 0.01);
+    assert!(c.y > a.y && (c.x - a.x).abs() < 0.01);
+}

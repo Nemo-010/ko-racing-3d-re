@@ -648,6 +648,41 @@ impl RaceConfig {
     }
 }
 
+/// `.bck` - class `al` (method `q(int)`).
+///
+/// ```text
+/// str   texture            # looked up as /images/<name>.jpg, then .png
+/// u32   colour[4]          # only the middle two are kept by the MIDlet
+/// u8    detail
+/// i32   scale_a            # stored as an integer, divided by 1000
+/// i32   scale_b
+/// ```
+pub struct Background {
+    pub texture: String,
+    pub colours: [u32; 4],
+    pub detail: u8,
+    pub scale_a: f32,
+    pub scale_b: f32,
+}
+
+impl Background {
+    pub fn parse(data: &[u8]) -> Option<Background> {
+        let mut r = Reader::new(data);
+        let texture = r.string();
+        let colours = [r.u32(), r.u32(), r.u32(), r.u32()];
+        let detail = r.u8();
+        let scale_a = r.i32() as f32 / 1000.0;
+        let scale_b = r.i32() as f32 / 1000.0;
+        Some(Background {
+            texture,
+            colours,
+            detail,
+            scale_a,
+            scale_b,
+        })
+    }
+}
+
 /// `.tab` - class `g`.
 pub struct FontTable {
     pub codes: Vec<u16>,

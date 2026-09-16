@@ -76,6 +76,18 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
   spinning at the ten degrees a second the MIDlet's own preview uses, with the
   four stat bars beside it.  Display only: nothing is for sale.  All eight cars
   are built once at startup.
+* **Sky** (`sky`) - the `.bck` backgrounds.  A track's theme byte picks one of
+  the five (`al.a` lists them clear, rain, snow, desert and sunset, and
+  `al.q(j)` is called with the theme while the race is set up), and the file
+  names a strip under `/images/` that is tried as `.jpg` and then `.png`, which
+  is the reader's own rule.  M3G scales a 2D background image to the viewport,
+  so the strip is stretched to the screen and the scene drawn over it.
+* **HUD extras** (`hud`) - a speedometer and a minimap.  `r.java` feeds the HUD
+  a speed and its fraction of the car's maximum and the `cg` element draws that
+  fraction as a bar, so the port shows a number and a bar; `bs.a()` builds a
+  three-pixel-per-cell image of the track and maps positions onto it, so the
+  port draws the same grid with every car on it and a tick along each heading,
+  which is where the rivals are.
 * **Menus** (`menu`) - main menu, the career event list, the deluxe list, a
   quick-race list of all 40 tracks, the car screen and its showroom, a pause
   menu and a results panel.  Locked events grey out and show the
@@ -118,6 +130,8 @@ src/scene.rs     map -> baked meshes + collision + barriers + car geometry
 src/physics.rs   rapier world and cars
 src/ai.rs        opponent driving
 src/race.rs      laps, checkpoints and timing
+src/sky.rs       the .bck sky and horizon
+src/hud.rs       speedometer and minimap
 src/text.rs      text drawing, over macroquad's rasteriser
 src/main.rs      macroquad front-end
 tests/port.rs    headless checks
@@ -277,8 +291,7 @@ as-is.
 
 ## Not implemented
 
-* the mid-race HUD of the original (its rival-position arrows, speedometer and
-  minimap); the `.bck` backgrounds;
+
 * the original's own menu *layout*: its labels are read (`ui/ui.txt`, plain
   text) and used where a screen needs one, but the screens themselves are the
   port's, since the MIDlet positions every one of them by hand;
