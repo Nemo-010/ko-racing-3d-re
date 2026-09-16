@@ -226,10 +226,13 @@ What that means in practice, in both directions:
   rather than quietly patched. The whole trail from "what is this file" to "the
   numbers are in a table" is in the commits.
 * **What it does not buy.** No human has read this code with an author's eye.
-  The parts that need eyes are exactly the parts that could not be checked: the
-  menu layout, the camera framing, how the rendered theme sounds, how the
-  showroom sits in frame. Those were reasoned about and never seen, because the
-  environment this was written in has no display and no speakers.
+  The parts that need eyes are exactly the parts that could not be checked: how
+  the front end's jump and map read in motion, the camera framing, how the
+  rendered theme sounds, how the showroom sits in frame.  The front end's
+  *geometry* is pinned by a test (the planet's size at rest, and that it covers
+  the screen when the jump lands) and its layout is the MIDlet's own numbers, but
+  nothing here has seen a frame: the environment this was written in has no
+  display and no speakers.
 
 Nothing here was copied from anywhere but the game. The archive, the decompiled
 classes and everything extracted from them are gitignored; the code, the prose
@@ -268,27 +271,31 @@ Implemented: resource-archive reader; all format parsers (mesh, `.tl`,
 per-texture meshes; a road graph built from the tiles' drivable-side flags;
 a collision world taken from each tile's collision mesh, so ramps and
 platforms are real; a rapier raycast vehicle for the player plus AI opponents
-that follow the road; lap, checkpoint and timing rules; and menus - main menu,
-career event list, quick race, car selection with stat bars, pause and results
-- with the deluxe campaign's 13 extra levels opened by points rather than by the
-original's SMS purchase, career points and per-race best times, a display-only
-showroom, the `.bck` sky, a speedometer and minimap, an OPTIONS screen whose
-settings persist in the XDG directories (or beside the executable, or wherever
-`KORA_SAVE` points), menus built from macroquad's own UI toolkit and skinned to
-the original's palette (so they take a pointer as well as a keyboard), and no
-garage or medals,
+that follow the road; lap, checkpoint and timing rules; and the front end the
+original actually has - a starfield with the Earth from orbit on it, the entries
+along the bottom in a bar with `<` and `>` either side rather than a list, the
+jump into the map that CAREER starts, and the map itself (`/images/map.jpg`) with
+a marker per level and the races that start from each - followed by the career
+event list, quick race, car selection with stat bars, pause and results, with the
+deluxe campaign's 13 extra levels opened by points rather than by the original's
+SMS purchase, career points and per-race best times, a display-only showroom, the
+`.bck` sky, a speedometer and minimap, an OPTIONS screen whose settings persist in
+the XDG directories (or beside the executable, or wherever `KORA_SAVE` points),
+the screens behind the front end built from macroquad's own UI toolkit and
+skinned to the original's palette (so they take a pointer as well as a keyboard),
+and no garage or medals,
 because the original has none.  No paywall and no network code of
 any kind.  On-screen text is set in
 Contrail One (SIL Open Font License, bundled in `rust/kora/fonts/`) and
 rasterised by macroquad, rather than the pack's bitmap fonts, which the tooling
 still decodes.  `cargo test --release`
-runs 19 headless checks, including building all 40 tracks, driving AI round
-four of them, a whole race run to the flag and scored, and the point and
-best-time rules.
+runs 43 headless checks, including building all 40 tracks, driving AI round
+four of them, a whole race run to the flag and scored, the point and best-time
+rules, every texture coordinate landing on the right texel, and every career
+race reaching a marker on the map.
 
 Not implemented: sound effects (every `.amr` clip is missing from the pack),
-the Bluetooth/Vserv/SMS code paths, drift scoring and the original's menu
-artwork.  See
+the Bluetooth/Vserv/SMS code paths, and drift scoring.  See
 [`rust/kora/README.md`](rust/kora/README.md).
 
 ## Suggested next steps

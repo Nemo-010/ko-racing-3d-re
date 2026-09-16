@@ -83,6 +83,12 @@ and in the menus the arrows move, **Enter** confirms and **Esc** goes back.
   is how the flag semantics were confirmed rather than guessed.  The graph
   provides the race direction, a starting grid, and the "next point on the
   road" lookahead the AI steers at.
+* **The front end** (`space`, `menu`, `map`) - the original's own: the starfield
+  and the planet on their black backdrop, the entries along the bottom in a bar
+  with `<` and `>` either side to step through them, the jump into the map that
+  choosing CAREER starts, and the map itself - `/images/map.jpg` with a marker
+  per level, the races that start from each in a panel, and the arrows to walk
+  the markers.  See [The front end](#the-front-end).
 * **Career tables** (`campaign`) - `campaign.000` and `deluxe.000` list the
   levels and races, and each race record points at its setup in the matching
   `.001`.  Every game mode stores that setup with its own layout, all five of
@@ -170,6 +176,8 @@ src/ai.rs        opponent driving
 src/race.rs      laps, checkpoints and timing
 src/settings.rs  the options screen's settings, and their file
 src/sky.rs       the .bck sky and horizon
+src/space.rs     the front end's backdrop: stars, and the planet
+src/map.rs       the career map: markers, races, and the panel
 src/hud.rs       speedometer and minimap
 src/theme.rs     the ui skin: the MIDlet's palette over macroquad's widgets
 src/text.rs      text drawing, over macroquad's rasteriser
@@ -215,6 +223,10 @@ macroquad context.
 | `car_texture_coordinates_land_on_the_car` | the texture coordinates are not flipped: they land on the bodywork, glass and livery, not the empty field beside them |
 | `every_track_texture_coordinate_fits_its_tiled_atlas` | every mesh of every track keeps its coordinates inside the tiled copy of its atlas |
 | `tiling_a_texture_is_the_same_as_wrapping_it` | a lookup in the tiled copy is a wrapping lookup in the original, and needs no copy when the coordinates already fit |
+| `every_career_race_has_a_marker_on_the_map` | every race in both tables lands on exactly one marker, and every marker is on the picture |
+| `the_career_map_walks_west_to_east_and_back` | the arrows reach every marker and never skip one, in both directions |
+| `the_planet_grows_from_a_disc_to_the_whole_view` | the planet is a modest disc at rest and covers the screen when the jump lands |
+| `the_pictures_the_front_end_needs_decode` | the maps, both planet plates and the five sky strips all decode |
 
 ## No paywall, no server
 
@@ -240,6 +252,60 @@ engine, damping, steering, friction and brakes is the port's, chosen so the
 first car in `ba.a`'s list lands on the constants the port was calibrated with;
 `physics::Tuning` documents it.
 
+## The front end
+
+The MIDlet's front end is not a list.  `bd` draws a black `Background`, a
+billboard of `/tex/ea.jpg` - the Earth from orbit - tilted -45 degrees about X
+so the planet is seen from slightly above and spun about Z, and in front of it
+`ce`, a starfield whose stars are pushed outward from the middle of the screen
+by a "warp" factor.  The entries are not stacked either: each one is an `s`,
+which is a label in the bar along the bottom with `<` and `>` either side, slid
+in from the side that was pressed, and `y.a(int, int)` turns the bottom 70
+pixels of the left and right edges into arrow buttons, so a finger can drive it.
+The port does the same, drawn directly rather than through macroquad's widgets:
+`space` for the backdrop and `menu::bar_menu` for the bar.
+
+Choosing CAREER or DELUXE starts the jump.  `bd.F()` sets a target and
+`bd.b(float)` runs the billboard's scale at it exponentially from 1.2, handing
+the *same* number to `ce`, so the planet grows and the stars scatter together;
+`/tex/ms.jpg`, the same picture radially blurred, takes over partway, and past
+15.2 the map is set down in front of you.  `main::Jump` is that ramp.
+
+The map is `u` for the career and `br` for the deluxe tour.  Each opens its own
+picture - `/images/map.jpg` and `/images/map2.jpg` - and puts the campaign's
+levels on it as markers: `/images/st.png`, a star, while a level is closed, and
+`/images/qm.png`, a trophy, once it opens, eight frames each of four sizes in
+grey and four in gold, with the chosen one pulsing through its sizes, which is
+the animation `u.d` runs.  A marker is a level with at least one race starting
+from it, and choosing one lists those races in a panel beside it.
+
+Where the markers come from is worth spelling out, because it is spread across
+two tables: the campaign `.000` lists the *levels* (name, track, the flag the
+file carries, and the marker's x and y **in map pixels**), and each race record
+names the level it belongs to.  `map::markers` does that grouping, which is what
+`u.a(boolean)` does, and it is the one part of this that can be tested without a
+window, so it is.
+
+The arrows move the way `u.a(int)` moves: to the nearest marker along **by x**,
+not by distance.  The markers are scattered over the map rather than laid out in
+career order, so the walk goes west to east and back; the property that matters
+is that it reaches every marker and never skips one, which
+`the_career_map_walks_west_to_east_and_back` checks.  The port gates a level on
+career points (`Progress::open`) rather than on the `.000` flag, the same rule
+its lists use - the flag is the file's initial state, and the port has no server
+or purchase to move it.
+
+The camera seeing the billboard is the game's own: `bq.a` sets the M3G
+perspective to a 90 degree vertical field of view, so a 2x2 quad 2.5 units away
+covers `2 / (2 * 2.5)` of the screen height and the tilt flattens that to 0.71 of
+it.  `space` applies that projection itself rather than standing up a 3D camera,
+because the stars have to stay behind the planet and macroquad's 3D pass clears
+the frame it draws into.  By the time the ramp is over the quad's near edge has
+passed behind the camera - which is what flying *into* a planet is, and which a
+projection cannot express, since those points would mirror through the middle of
+the view - so the depth is held at the near plane and the last frames fill the
+frame instead of turning it inside out.
+
 ## Audio and macroquad's features
 
 macroquad 0.4 has `default = []`, so the sound system is behind a feature:
@@ -247,6 +313,21 @@ without `features = ["audio"]` the audio module is a stub whose
 `load_sound_from_bytes` succeeds and plays nothing.  This crate enables it, and
 on Linux that pulls in `quad-alsa-sys`, so building needs the ALSA headers.  It
 is worth knowing before blaming your own code for the silence.
+
+The same trap catches the pictures.  macroquad builds the `image` crate behind
+`Texture2D::from_file_with_format` with only **PNG and TGA** turned on, so a
+`.jpg` of the game's - the career map, both planet plates - fails to decode, and
+the failure is easy to miss because every one of those loads is optional and
+falls back to drawing nothing.  Cargo unifies features, so this crate asks for
+the decoder itself:
+
+```toml
+image = { version = "0.24", default-features = false, features = ["jpeg"] }
+```
+
+which turns it on for macroquad's copy of the same crate too, without adding a
+second copy of it.  `the_pictures_the_front_end_needs_decode` fails if that
+line ever goes away.
 
 ## Where the save and the settings live
 
@@ -429,9 +510,12 @@ as-is.
 ## Not implemented
 
 
-* the original's own menu *layout*: its labels are read (`ui/ui.txt`, plain
-  text) and used where a screen needs one, but the screens themselves are the
-  port's, since the MIDlet positions every one of them by hand;
+* the original's own menu *layout* for the screens behind the front end: the
+  front end, the jump and the map are its (`bd`, `s`, `ce`, `u`, `br`), but the
+  race list, the showroom and the options are the port's, laid out with
+  macroquad's widgets rather than positioned by hand the way the MIDlet does -
+  its `cm`/`bi`/`db`/`af` widget tree and the per-widget coordinates are not
+  reproduced;
 * what counts as "passing" a race, which gates the award: the table gives each
   race an entry threshold and an award but not the finish condition, and the
   MIDlet's own test is a method this port has not read apart.  A podium finish

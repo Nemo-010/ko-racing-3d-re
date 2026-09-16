@@ -1,22 +1,29 @@
-//! Every screen outside the race, built with macroquad's own UI toolkit.
+//! The screens outside the race.
 //!
-//! The widgets are macroquad's (`root_ui().button`, `Window`, `progress_bar`),
-//! which means the menus take a pointer as well as a keyboard, and the look
-//! comes from the skin in [`crate::theme`] - the MIDlet's own palette of grey
-//! panels, gradient headers and a dark red for the choice under the cursor.
+//! The front end is the MIDlet's own: the space backdrop with the Earth in it,
+//! and the entries along the bottom in a bar with `<` and `>` either side to
+//! step through them, which is what the original does rather than a list.  The
+//! screens behind it - the map, the race lists, the showroom, the options - are
+//! built with macroquad's UI toolkit (`root_ui().button`, `Window`,
+//! `progress_bar`), so they take a pointer as well as a keyboard, and they wear
+//! the skin in [`crate::theme`] - the MIDlet's own palette of grey panels,
+//! gradient headers and a dark red for the choice under the cursor.
 //!
-//! The exception is the racing HUD in [`crate::hud`], which is a gauge and a
-//! map rather than a menu, and is drawn directly.
+//! The exceptions are the front end itself and the racing HUD in [`crate::hud`],
+//! which are drawn directly.
 
 use macroquad::prelude::*;
+use macroquad::texture::Texture2D;
 use macroquad::ui::{hash, root_ui, widgets::Window};
 
 use crate::campaign::RaceEvent;
 use crate::labels::mode_name;
 use crate::labels;
+use crate::pack::Resources;
 use crate::progress::{CarInfo, Progress};
 use crate::settings::Settings;
-use crate::theme::Theme;
+use crate::text;
+use crate::theme::{self, Theme};
 
 /// The main menu, shared with `main` so the cursor and the labels agree.
 /// These are label keys rather than text.
@@ -65,48 +72,198 @@ pub fn format_time(seconds: f32) -> String {
     format!("{minutes}:{rest:05.2}")
 }
 
-pub fn main_menu(theme: &Theme, progress: &Progress, cursor: &mut usize) -> Action {
-    let mut chosen = None;
-    let size = vec2(360.0, 150.0 + MAIN_ITEMS.len() as f32 * 48.0);
-    {
-        let mut ui = root_ui();
-        Window::new(hash!("kora-main"), centred_window(size), size)
-            .label(labels::get("kora"))
-            .movable(false)
-            .close_button(false)
-            .ui(&mut *ui, |ui| {
-                ui.label(None, &labels::format("career_points", &[&progress.points.to_string()]));
-                for (index, key) in MAIN_ITEMS.iter().enumerate() {
-                    let focused = index == *cursor;
-                    if focused {
-                        ui.push_skin(&theme.selected);
-                    }
-                    if ui.button(None, labels::get(key)) {
-                        chosen = Some(index);
-                    }
-                    let hovered = ui.last_item_hovered();
-                    if focused {
-                        ui.pop_skin();
-                    }
-                    if hovered {
-                        *cursor = index;
-                    }
-                }
-            });
+/// The bottom bar the MIDlet's front end puts its entries in: the current one
+/// centred, with `<` and `>` either side, slid in from the side that was
+/// pressed.  `s` is the widget that does the sliding, and `y.a(int, int)` gives
+/// the bottom 70 pixels of the left and right edges to the two arrows, so the
+/// bar works with a finger as well as with the arrow keys.
+pub struct Bar {
+    /// How far the showing label still has to slide in, in pixels.
+    offset: f32,
+    showing: usize,
+    /// Which side it is sliding in from.
+    from: f32,
+}
+
+/// `s`: the distance a label comes in from, and how fast.
+const SLIDE: f32 = 180.0;
+const SLIDE_SPEED: f32 = 900.0;
+/// `bg`: the height of the bar along the bottom of the screen.
+const BAR_HEIGHT: f32 = 28.0;
+/// `y.a(int, int)`: the corner a finger has to be in to be an arrow.
+const ARROW_ZONE: f32 = 70.0;
+
+impl Bar {
+    pub fn new(cursor: usize) -> Bar {
+        Bar {
+            offset: 0.0,
+            showing: cursor,
+            from: 1.0,
+        }
     }
-    cursor_keys(cursor, MAIN_ITEMS.len());
+
+    /// `s.a(float)` / `s.b()`: a new entry arrives from the side that was
+    /// pressed, and slides to the middle.
+    fn update(&mut self, dt: f32, cursor: usize) {
+        if cursor != self.showing {
+            self.from = if cursor > self.showing { 1.0 } else { -1.0 };
+            self.showing = cursor;
+            self.offset = SLIDE;
+            return;
+        }
+        self.offset = (self.offset - SLIDE_SPEED * dt).max(0.0);
+    }
+}
+
+/// The front end: the space backdrop, the entries in a bar along the bottom, and
+/// the arrows either side to step through them.
+pub fn bar_menu(
+    resources: &Resources,
+    space: &mut crate::space::Space,
+    bar: &mut Bar,
+    progress: &Progress,
+    cursor: &mut usize,
+) -> Action {
+    let dt = get_frame_time();
+    let (width, height) = (screen_width(), screen_height());
+    let count = MAIN_ITEMS.len();
+    let top = height - BAR_HEIGHT;
+
+    let mut chosen = None;
+    if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::Up) {
+        *cursor = (*cursor + count - 1) % count;
+    }
+    if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::Down) {
+        *cursor = (*cursor + 1) % count;
+    }
+    if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
+        chosen = Some(*cursor);
+    }
+    // macroquad raises mouse events from touches too, so this is the same code
+    // for a click and for a tap on a phone.
+    if is_mouse_button_pressed(MouseButton::Left) {
+        let point = Vec2::from(mouse_position());
+        if point.y > height - ARROW_ZONE && point.x < ARROW_ZONE {
+            *cursor = (*cursor + count - 1) % count;
+        } else if point.y > height - ARROW_ZONE && point.x > width - ARROW_ZONE {
+            *cursor = (*cursor + 1) % count;
+        } else if point.y > top {
+            chosen = Some(*cursor);
+        }
+    }
+
+    bar.update(dt, *cursor);
+    space.update(dt, 0.0, crate::space::SCALE);
+    space.draw();
+    draw_frame(resources, bar, progress, *cursor, top);
 
     if let Some(index) = chosen {
-        *cursor = index;
         return Action::Activate(index);
-    }
-    if is_key_pressed(KeyCode::Enter) {
-        return Action::Activate(*cursor);
     }
     if is_key_pressed(KeyCode::Escape) {
         return Action::Back;
     }
     Action::None
+}
+
+/// The logo, the points, and the bar itself.
+fn draw_frame(
+    resources: &Resources,
+    bar: &Bar,
+    progress: &Progress,
+    cursor: usize,
+    top: f32,
+) {
+    let (width, height) = (screen_width(), screen_height());
+    let scale = (height / 240.0).max(1.0);
+
+    // `bd`: the logo sits in the top right corner, drifting up and down.
+    let bob = (get_time() as f32 * 0.4).sin() * 2.0 * scale;
+    if let Some(logo) = logo(resources) {
+        let size = vec2(logo.width(), logo.height()) * scale;
+        draw_texture_ex(
+            logo,
+            screen_width() - size.x - 4.0 * scale,
+            4.0 * scale + bob,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(size),
+                ..Default::default()
+            },
+        );
+    }
+    text::draw_shadow(
+        &labels::format("career_points", &[&progress.points.to_string()]),
+        6.0 * scale,
+        6.0 * scale,
+        14.0 * scale,
+        WHITE,
+    );
+
+    let label = labels::get(MAIN_ITEMS[cursor]);
+    let size = 22.0 * scale;
+    let slide = bar.from * bar.offset;
+    text::draw_shadow(
+        &label,
+        width / 2.0 + slide - text::width(&label, size) / 2.0,
+        top + (BAR_HEIGHT - size) / 2.0,
+        size,
+        WHITE,
+    );
+
+    // `aq.a(Graphics, 0, height - 28, width, 28, 0x999999, 0x666666, true)`.
+    bar_gradient(0.0, top, width, BAR_HEIGHT);
+    draw_line(0.0, top, width, top, 1.0, theme::BAR_TOP);
+
+    let arrow = 20.0 * scale;
+    text::draw_shadow("<", 10.0 * scale, top + (BAR_HEIGHT - arrow) / 2.0, arrow, WHITE);
+    text::draw_shadow(
+        ">",
+        width - 10.0 * scale - text::width(">", arrow),
+        top + (BAR_HEIGHT - arrow) / 2.0,
+        arrow,
+        WHITE,
+    );
+
+    let hint = labels::get("keys_menu");
+    text::draw_shadow(
+        &hint,
+        6.0 * scale,
+        top - 18.0 * scale,
+        13.0 * scale,
+        WHITE,
+    );
+}
+
+/// The bar's gradient, line by line, the way `aq.a` draws it.
+fn bar_gradient(x: f32, y: f32, width: f32, height: f32) {
+    for step in 0..height as usize {
+        let t = step as f32 / height;
+        draw_rectangle(
+            x,
+            y + step as f32,
+            width,
+            1.0,
+            Color::new(
+                theme::BAR_TOP.r + (theme::BAR_BOTTOM.r - theme::BAR_TOP.r) * t,
+                theme::BAR_TOP.g + (theme::BAR_BOTTOM.g - theme::BAR_TOP.g) * t,
+                theme::BAR_TOP.b + (theme::BAR_BOTTOM.b - theme::BAR_TOP.b) * t,
+                1.0,
+            ),
+        );
+    }
+}
+
+/// `/images/lg.png`, the front end's logo, decoded once.
+fn logo(resources: &Resources) -> Option<&'static Texture2D> {
+    static LOGO: std::sync::OnceLock<Option<Texture2D>> = std::sync::OnceLock::new();
+    LOGO.get_or_init(|| {
+        let texture =
+            Texture2D::from_file_with_format(resources.get("images/lg.png")?, None);
+        texture.set_filter(FilterMode::Linear);
+        Some(texture)
+    })
+    .as_ref()
 }
 
 /// A scrolling list of races: the game's own mode name, the lap count, the grid

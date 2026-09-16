@@ -96,4 +96,6 @@ sure	ARE YOU SURE?	105
 yes	YES	103
 no	NO	104
 main_menu	MAIN MENU	159
+select_race	SELECT RACE	70
+map_keys	ARROWS PICK A LEVEL   UP/DOWN A RACE   ENTER RACE   ESC BACK	-
 reset_complete	CAREER RESET	99

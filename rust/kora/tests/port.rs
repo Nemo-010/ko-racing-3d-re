@@ -909,7 +909,7 @@ fn the_bundled_font_covers_the_interface() {
     // Every character any string in the UI can contain: the leaderboard and
     // results rows, the stat labels, and the formatted numbers and times.
     // Map files and car files are lower case ("ma1.map", "rally.car").
-    let used = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /:.-+()";
+    let used = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /:.-+()<>%";
     for ch in used.chars() {
         assert_ne!(
             font.lookup_glyph_index(ch),
@@ -931,6 +931,11 @@ fn the_bundled_font_covers_the_interface() {
         "SPEED",
         "GOLD",
         "ARROWS SELECT   ENTER CONFIRM   ESC BACK",
+        "SELECT RACE",
+        "ARROWS PICK A LEVEL   UP/DOWN A RACE   ENTER RACE   ESC BACK",
+        "42%",
+        "<",
+        ">",
     ];
     for sample in samples {
         for ch in sample.chars() {
@@ -1213,6 +1218,8 @@ fn the_label_table_is_well_formed() {
             "keys_cars",
             "keys_race",
             "points",
+            "select_race",
+            "map_keys",
         ],
     ];
     for (index, group) in required.iter().enumerate() {
@@ -2016,4 +2023,193 @@ fn tiling_a_texture_is_the_same_as_wrapping_it() {
     let inside = scene::Tiling::for_bounds([0.1, 0.9, 0.2, 0.8]);
     assert!(inside.is_identity(), "{inside:?}");
     assert_eq!(inside.size(128, 128), (128, 128));
+}
+
+/// The career map is the MIDlet's `u` and `br`: `/images/map.jpg` with the
+/// levels on it as markers, each carrying the races that start there.  `u`
+/// groups the race table onto the level table, and a level with nothing to
+/// start from gets no marker at all - so every race has to end up on exactly
+/// one marker, and every marker has to be somewhere on the picture.
+#[test]
+fn every_career_race_has_a_marker_on_the_map() {
+    use kora::{campaign, map};
+
+    let resources = pack::load(&assets());
+    let events = campaign::events(&resources);
+    let tables = campaign::load(&resources);
+    assert_eq!(tables.len(), 2, "expected the career and deluxe tables");
+
+    for (name, table) in &tables {
+        let mine: Vec<_> = events
+            .iter()
+            .filter(|event| &event.table == name)
+            .cloned()
+            .collect();
+        assert!(!mine.is_empty(), "{name} has no races");
+        let markers = map::markers(&mine, &table.levels);
+        assert!(
+            markers.len() >= 5,
+            "{name}: {} markers on the map",
+            markers.len()
+        );
+
+        // Every race is on a marker, once, and no marker is empty.
+        let placed: usize = markers.iter().map(|marker| marker.races.len()).sum();
+        assert_eq!(placed, mine.len(), "{name}: {} of {} races placed", placed, mine.len());
+        for marker in &markers {
+            assert!(!marker.races.is_empty(), "{name}: a marker with no races");
+            assert!(!marker.name.is_empty(), "{name}: a marker with no name");
+        }
+
+        // The markers have to be on the picture, since that is where they are
+        // drawn.  `map` decodes the same way the screen does.
+        let path = if name.ends_with("deluxe") {
+            "images/map2.jpg"
+        } else {
+            "images/map.jpg"
+        };
+        let image = Image::from_file_with_format(&resources[path], None)
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
+        for marker in &markers {
+            assert!(
+                marker.position.x >= 0.0
+                    && marker.position.y >= 0.0
+                    && marker.position.x < image.width as f32
+                    && marker.position.y < image.height as f32,
+                "{name}: {} sits at {:?}, off a {}x{} map",
+                marker.name,
+                marker.position,
+                image.width,
+                image.height
+            );
+        }
+    }
+}
+
+/// `u.a(int)` steps to the nearest marker along *by x*: the markers are
+/// scattered over the map rather than laid out in career order, so pressing
+/// right walks them from west to east and never skips one, and pressing left
+/// walks back.  This is the property the arrows rest on - if the walk could
+/// skip a marker, a player could never reach it.
+#[test]
+fn the_career_map_walks_west_to_east_and_back() {
+    use kora::{campaign, map};
+
+    let resources = pack::load(&assets());
+    let events = campaign::events(&resources);
+    for (name, table) in &campaign::load(&resources) {
+        let mine: Vec<_> = events
+            .iter()
+            .filter(|event| &event.table == name)
+            .cloned()
+            .collect();
+        let markers = map::markers(&mine, &table.levels);
+        let west = markers
+            .iter()
+            .enumerate()
+            .min_by(|a, b| a.1.position.x.total_cmp(&b.1.position.x))
+            .map(|(index, _)| index)
+            .unwrap();
+
+        // Right from the westernmost marker reaches every marker, in order.
+        let mut cursor = west;
+        let mut seen = vec![cursor];
+        while let Some(next) = map::next_marker(&markers, cursor, true) {
+            assert!(
+                markers[next].position.x > markers[cursor].position.x,
+                "{name}: right did not go east"
+            );
+            cursor = next;
+            seen.push(cursor);
+        }
+        assert_eq!(
+            seen.len(),
+            markers.len(),
+            "{name}: the walk right reached {} of {} markers",
+            seen.len(),
+            markers.len()
+        );
+        // It is a walk, so it visits each marker once and never doubles back.
+        let mut visited = seen.clone();
+        visited.sort_unstable();
+        visited.dedup();
+        assert_eq!(
+            visited.len(),
+            markers.len(),
+            "{name}: the walk right repeated a marker"
+        );
+
+        // And the same walk comes back to where it started.
+        while let Some(previous) = map::next_marker(&markers, cursor, false) {
+            assert!(
+                markers[previous].position.x < markers[cursor].position.x,
+                "{name}: left did not go west"
+            );
+            cursor = previous;
+        }
+        assert_eq!(cursor, west, "{name}: left did not return to the start");
+    }
+}
+
+/// The map pictures and both planet plates are JPEGs, and macroquad builds the
+/// `image` crate it decodes with without a JPEG decoder unless something in the
+/// build asks for one - the port's `Cargo.toml` does, and this is why.  Without
+/// it the map, the planet and its blurred plate all fail to load, and each fails
+/// *silently*: the screen draws a black frame and nothing says why.
+#[test]
+fn the_pictures_the_front_end_needs_decode() {
+    let resources = pack::load(&assets());
+    for path in [
+        "images/map.jpg",
+        "images/map2.jpg",
+        "tex/ea.jpg",
+        "tex/ms.jpg",
+        // The sky strips the five `.bck` backgrounds name are PNGs, and the
+        // MIDlet tries a `.jpg` of the same name first.
+        "images/bc.png",
+        "images/bd.png",
+        "images/br.png",
+        "images/bs.png",
+        "images/bss.png",
+    ] {
+        let image = Image::from_file_with_format(&resources[path], None)
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
+        assert!(
+            image.width >= 100 && image.height >= 60,
+            "{path} decoded as {}x{}",
+            image.width,
+            image.height
+        );
+    }
+}
+
+/// The front end's planet is a 2x2 M3G billboard 2.5 units from a 90 degree
+/// camera, tilted 45 degrees, and `bd` runs its scale from 1.2 to 15.2 to jump
+/// to the map.  Two things have to hold for that to look right: at rest the
+/// planet has to be a modest disc rather than something filling the view, and
+/// by the time the ramp is over it has to cover the screen, because it is the
+/// thing that is meant to swallow the menu.
+#[test]
+fn the_planet_grows_from_a_disc_to_the_whole_view() {
+    use kora::space;
+    let screen = vec2(1280.0, 720.0);
+
+    let resting = space::planet_reach(space::SCALE, screen);
+    assert!(
+        resting.x > screen.x * 0.08 && resting.x < screen.x * 0.4,
+        "the planet is {} px wide at rest, on a {} px screen",
+        resting.x * 2.0,
+        screen.x
+    );
+    assert!(
+        resting.y < resting.x,
+        "the 45 degree tilt has to flatten it: {:?}",
+        resting
+    );
+
+    let landing = space::planet_reach(space::SCALE_LIMIT, screen);
+    assert!(
+        landing.x > screen.x && landing.y > screen.y,
+        "the planet only covers {landing:?} of {screen:?} when the jump lands"
+    );
 }

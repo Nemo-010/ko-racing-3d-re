@@ -7,6 +7,13 @@ description = "Rust reimplementation of the K.O. Racing 3D (Jollybox) racing eng
 [dependencies]
 macroquad = { version = "0.4.16", features = ["audio"] }
 rapier3d = "0.35"
+# The MIDlet's backgrounds, map and planet are JPEGs, and macroquad builds the
+# `image` crate behind them with only PNG and TGA turned on.  Cargo unifies
+# features, so asking for the decoder here turns it on for macroquad's copy of
+# the same crate too - without it `Texture2D::from_file_with_format` refuses
+# every .jpg the game ships, which is the map, both planet plates and five of
+# the sky strips.
+image = { version = "0.24", default-features = false, features = ["jpeg"] }
 
 [dev-dependencies]
 # Already in the tree behind macroquad; used to check the bundled font parses

@@ -25,7 +25,7 @@ use kora::progress::{self, Progress};
 use kora::race::Race;
 use kora::text;
 use kora::settings::Settings;
-use kora::{format, hud, menu, music, pack, paths, scene, sky, theme};
+use kora::{format, hud, map, menu, music, pack, paths, scene, sky, space, theme};
 
 /// The asset directory: `KORA_ASSETS`, or `assets` in the working directory.
 ///
@@ -59,6 +59,41 @@ enum Screen {
     Race,
     Paused,
     Results,
+    /// The career map (`u`, or `br` for the deluxe tour), by table index.  The
+    /// list screens stay as the fallback for a table with no markers on it.
+    Map(usize),
+}
+
+/// The jump from the menu into a map: `bd.F()` sets the target and the ramp in
+/// `bd.b(float)` runs the billboard's scale up at it.  The scale is also what
+/// the stars are dragged at (`bd` hands the same number to `ce`), which is why
+/// the planet grows and the starfield scatters at the same moment.
+struct Jump {
+    table: usize,
+    scale: f32,
+    elapsed: f32,
+}
+
+impl Jump {
+    fn new(table: usize) -> Jump {
+        Jump {
+            table,
+            scale: space::SCALE,
+            elapsed: 0.0,
+        }
+    }
+
+    fn update(&mut self, dt: f32) {
+        self.elapsed += dt;
+        // `bd.b(float)`, phase 0: the scale runs away from itself.
+        self.scale += self.scale * dt * 3.0 * (self.scale + 0.3) / 0.5;
+    }
+
+    /// `bd`: past 15.2 the map takes over; the timer is only there so a hitch
+    /// cannot leave the front end stuck in the jump.
+    fn over(&self) -> bool {
+        self.scale > space::SCALE_LIMIT || self.elapsed > 3.0
+    }
 }
 
 /// A race in progress: the track, the cars and the running order.
@@ -539,6 +574,24 @@ async fn main() {
     // shell and keeps the environment overrides meaningful.
     let mut screen = Screen::Main;
     let mut cursor = 0usize;
+    // The front end's backdrop (the Earth, and the stars the jump scatters),
+    // the bar its entries sit in, and the map a jump lands on.
+    let mut space = space::Space::new(&resources, screen_width(), screen_height());
+    let mut bar = menu::Bar::new(0);
+    let mut jump: Option<Jump> = None;
+    let mut map_screen: Option<map::MapScreen> = None;
+    // The career tables with their level lists, which is what the maps need:
+    // a level's marker position, its name and whether it is open.
+    let tables = campaign::load(&resources);
+    let table_at = |index: usize| -> Option<(String, Vec<RaceEvent>)> {
+        let (name, _) = tables.get(index)?;
+        let events: Vec<RaceEvent> = all_events
+            .iter()
+            .filter(|event| &event.table == name)
+            .cloned()
+            .collect();
+        Some((name.clone(), events))
+    };
     let mut showroom_spin = 0.0f32;
     let mut confirming_reset = false;
     let mut running: Option<Running> = None;
@@ -590,19 +643,58 @@ async fn main() {
             set_sound_volume(track, if music_playing { settings.volume } else { 0.0 });
         }
 
+        // The jump runs on its own: the map is built when the planet has
+        // swallowed the view, which is where `bd.b(float)` changes screen.
+        if let Some(active) = jump.as_mut() {
+            active.update(dt);
+            space.update(dt, active.scale - 0.4, active.scale);
+            space.draw();
+            if active.over() {
+                let index = active.table;
+                map_screen = table_at(index).and_then(|(name, events)| {
+                    let (_, campaign) = tables.get(index)?;
+                    let title = match index {
+                        0 => labels::get("menu_career").to_string(),
+                        _ => labels::get("menu_deluxe").to_string(),
+                    };
+                    map::MapScreen::new(
+                        &resources,
+                        &name,
+                        title,
+                        &events,
+                        &campaign.levels,
+                        &progress,
+                    )
+                });
+                cursor = 0;
+                screen = if map_screen.is_some() {
+                    Screen::Map(index)
+                } else {
+                    // A table with nothing on its map keeps its list screen.
+                    if index == 0 {
+                        Screen::Career
+                    } else {
+                        Screen::Deluxe
+                    }
+                };
+                jump = None;
+            }
+            next_frame().await;
+            continue;
+        }
+
         match screen {
             Screen::Main => {
-                if let menu::Action::Activate(choice) = menu::main_menu(&theme, &progress, &mut cursor)
+                if let menu::Action::Activate(choice) =
+                    menu::bar_menu(&resources, &mut space, &mut bar, &progress, &mut cursor)
                 {
                     message.clear();
                     match choice {
-                        0 => {
+                        0 | 1 => {
+                            // CAREER and DELUXE open the map through the jump;
+                            // the MIDlet's front end does the same.
                             cursor = 0;
-                            screen = Screen::Career;
-                        }
-                        1 => {
-                            cursor = 0;
-                            screen = Screen::Deluxe;
+                            jump = Some(Jump::new(choice));
                         }
                         2 => {
                             cursor = 0;
@@ -621,6 +713,52 @@ async fn main() {
                 }
                 if !message.is_empty() {
                     text::draw_shadow(&message, 16.0, 12.0, 19.0, WHITE);
+                }
+            }
+
+            Screen::Map(index) => {
+                let Some(active) = map_screen.as_mut() else {
+                    screen = Screen::Main;
+                    next_frame().await;
+                    continue;
+                };
+                active.update(dt);
+                let (action, _) = active.input();
+                active.draw(&progress);
+                match action {
+                    map::MapAction::Back => {
+                        map_screen = None;
+                        cursor = 0;
+                        screen = Screen::Main;
+                    }
+                    map::MapAction::Start => {
+                        if let Some(event) = active.event().cloned() {
+                            if !progress.open(event.threshold) {
+                                message = labels::format(
+                                    "race_needs",
+                                    &[&event.name.to_uppercase(), &event.threshold.to_string()],
+                                );
+                            } else {
+                                let file = cars
+                                    .get(progress.car)
+                                    .map(|car| car.file.clone())
+                                    .unwrap_or_else(|| "rally.car".to_string());
+                                running = start_race(
+                                    &resources,
+                                    &dir,
+                                    &event,
+                                    &file,
+                                    &settings,
+                                    Screen::Map(index),
+                                );
+                                if running.is_some() {
+                                    message.clear();
+                                    screen = Screen::Race;
+                                }
+                            }
+                        }
+                    }
+                    map::MapAction::None => {}
                 }
             }
 

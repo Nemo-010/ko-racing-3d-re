@@ -255,7 +255,7 @@ shipped `.map` files parse with zero trailing bytes.
 ```
 u8    level_count
 repeat level_count:
-    i16 x, i16 y                # preview / editor position
+    i16 x, i16 y                # the level's marker, in `/images/map.jpg` pixels
     str name                    # e.g. "TIMBERTON"
     str map                     # e.g. "ma1.map"
     u8  modes                   # bitmask of the game modes offered here
@@ -270,11 +270,17 @@ repeat download_count:
     str filename                # e.g. "full.txt"
 u8    extra_count
 repeat extra_count:
-    u8  a, u8 b
+    u8  a, u8 b                 # `b` is the index of the level this race
+                               #   starts from, i.e. which marker it hangs on
     i32 v0, i32 v1, i32 v2      # v2 is the skip offset into the `.001` file
 ```
 
-Both shipped files parse with zero trailing bytes.
+Both shipped files parse with zero trailing bytes.  **`x`/`y` are map pixels and
+`b` is the marker index**, which is what the map screen needs: `u.a(boolean)`
+groups the race records onto the level records by `b`, a level with no races
+gets no marker, and the arrows step to the nearest marker either side *by x*
+(`u.a(int)`), which is why the walk goes west to east rather than in table
+order - the career's levels are scattered over the picture.
 
 ## Campaign `.001` — per-level race config (`r.b()` / `cu.b()` / `dk.b()`)
 
