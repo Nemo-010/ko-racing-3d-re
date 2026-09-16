@@ -27,17 +27,17 @@ use kora::text;
 use kora::settings::Settings;
 use kora::{format, hud, menu, music, pack, paths, scene, sky, theme};
 
+/// The asset directory: `KORA_ASSETS`, or `assets` in the working directory.
+///
+/// That directory is an extracted tree - every resource at its original path,
+/// plus the `lists`, `ui` and `sounds` the game reads straight from the JAR -
+/// as `setup.sh` leaves it.  Pointing `KORA_ASSETS` at `x` reads the packed
+/// archive instead, which is the form the game shipped.
 fn assets_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("KORA_ASSETS") {
-        return PathBuf::from(dir);
+    match std::env::var("KORA_ASSETS") {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => PathBuf::from("assets"),
     }
-    for candidate in ["assets", "../assets", "rust/kora/assets"] {
-        let path = PathBuf::from(candidate);
-        if path.join("data").exists() {
-            return path;
-        }
-    }
-    PathBuf::from("assets")
 }
 
 /// Environment override, if set to a valid number.

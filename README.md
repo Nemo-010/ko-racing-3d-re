@@ -42,6 +42,7 @@ campaign.tsv            careers: level order, maps, unlock data (generated)
 tools/kora/             dependency-free Python readers + CLI
 tools/README.md         exact byte layouts and Rust-porting notes
 rust/kora/              playable Rust reimplementation (macroquad + rapier3d)
+rust/kora/assets/       the same resource tree, for the port (recreated by setup.sh)
 ```
 
 The game archive and everything extracted from it are **not** committed: it
@@ -49,7 +50,8 @@ is the property of its authors.  Only the reverse-engineering code and notes
 are in the repository.  Fetch and unpack the data with:
 
 ```sh
-./setup.sh          # downloads the JAR, fills x/, assets/ and rust/kora/assets/
+./setup.sh    # downloads the JAR; fills x/, assets/, the loose JAR dirs the
+              # game reads (lists/, ui/, sounds/) and the port's own tree
 ```
 
 Tools (Python 3, standard library only):

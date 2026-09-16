@@ -6,8 +6,13 @@
 # tools and the Rust port read:
 #
 #   x/                      raw JAR contents (decompilation input)
-#   assets/                 all resources at their original paths (Python tools)
-#   rust/kora/assets/       the data/data.* pack plus lists/ (Rust port)
+#   assets/                 every resource at its original path, plus the loose
+#                           JAR directories the game reads (Python tools)
+#   rust/kora/assets/       the same tree, for the Rust port
+#
+# The port reads an extracted tree, not the packed archive, so swapping an asset
+# is a matter of editing the file and running again.  It still understands the
+# packed form - give it `KORA_ASSETS=x` to read the archive itself.
 #
 # Usage:  ./setup.sh
 set -eu
@@ -32,13 +37,32 @@ mkdir -p "$X"
 echo "setup: extracting every resource into assets/"
 (cd "$ROOT/tools" && python3 -m kora unpack ../x ../assets)
 
-echo "setup: preparing the Rust port's asset directory"
-mkdir -p "$ROOT/rust/kora/assets/lists" "$ROOT/rust/kora/assets/sounds"
-cp "$X"/data "$X"/data.* "$ROOT/rust/kora/assets/"
-cp "$X"/lists/* "$ROOT/rust/kora/assets/lists/"
-# The only sound in the game is a JAR resource, not a pack entry.
-cp "$X"/sounds/theme.mid "$ROOT/rust/kora/assets/sounds/"
+# The game also reads a few directories straight out of the JAR rather than out
+# of its archive: the tile and detail lists, the interface text, and the theme.
+echo "setup: gathering the loose JAR directories"
+for loose in lists ui sounds; do
+    [ -d "$X/$loose" ] || continue
+    mkdir -p "$ROOT/assets/$loose"
+    cp "$X"/"$loose"/* "$ROOT/assets/$loose/"
+done
+
+# The port reads the same tree, from `assets` in its working directory.  The
+# Wavefront files `kora obj` writes and the extraction manifest are tool output
+# the game never reads, so they stay behind.
+echo "setup: giving the Rust port the same tree"
+rm -rf "$ROOT/rust/kora/assets"
+mkdir -p "$ROOT/rust/kora/assets"
+(
+    cd "$ROOT/assets"
+    for item in *; do
+        case "$item" in
+            obj|MANIFEST.tsv) continue ;;
+        esac
+        cp -R "$item" "$ROOT/rust/kora/assets/"
+    done
+)
 
 echo "setup: done"
 echo "  Python tools: python3 -m kora info x/"
 echo "  Rust port:    cd rust/kora && cargo run --release"
+echo "                (or, from here: cargo run --release --manifest-path rust/kora/Cargo.toml)"

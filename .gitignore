@@ -18,10 +18,7 @@
 /rust/kora/target/
 
 # Prepared Rust assets (recreated by ./setup.sh).
-/rust/kora/assets/data
-/rust/kora/assets/data.*
-/rust/kora/assets/lists/
-/rust/kora/assets/sounds/
+/rust/kora/assets/
 
 # Uploaded attachments, unpacked into the tree proper.
 /attachments/

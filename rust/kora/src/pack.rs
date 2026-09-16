@@ -23,7 +23,66 @@ use std::path::Path;
 
 pub type Resources = HashMap<String, Vec<u8>>;
 
+/// The index file at the root of an archive.
+pub const INDEX_NAME: &str = "data";
+/// The prefix its pages use.
+pub const PAGE_PREFIX: &str = "data.";
+
+/// Load a resource set from `dir`, whichever form it is in.
+///
+/// * the **archive** the game shipped, `data` plus `data.<n>`, if `dir` has an
+///   index - this is the authentic form, and what the readers were written
+///   against;
+/// * otherwise an **extracted tree**, every file under `dir` keyed by its path,
+///   which is what `kora unpack` and `setup.sh` produce.  Swapping an asset is
+///   then a matter of editing the file and running again.
 pub fn load(dir: &Path) -> Resources {
+    if dir.join(INDEX_NAME).exists() {
+        load_archive(dir)
+    } else {
+        load_tree(dir)
+    }
+}
+
+/// Read an extracted resource tree: every file beneath `dir` becomes a resource
+/// named by its path relative to it, so `assets/tiles/s.tl` is `tiles/s.tl`.
+///
+/// Tool output sitting in the same directory is skipped - the manifest, and the
+/// Wavefront files `kora obj` writes - since neither is something the game
+/// reads.
+pub fn load_tree(dir: &Path) -> Resources {
+    let mut resources = Resources::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let name = path
+                .strip_prefix(dir)
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            if name.is_empty() || name.ends_with(".tsv") || name.ends_with(".obj") {
+                continue;
+            }
+            match fs::read(&path) {
+                Ok(data) => {
+                    resources.insert(name, data);
+                }
+                Err(error) => eprintln!("could not read {}: {error}", path.display()),
+            }
+        }
+    }
+    resources
+}
+
+/// Load the shipped archive form: `data` plus its `data.<n>` pages.
+pub fn load_archive(dir: &Path) -> Resources {
     let index = fs::read(dir.join("data")).unwrap_or_else(|e| {
         panic!("cannot read {}: {e}\nCopy the pack's data/data.* files next to the binary.", dir.join("data").display())
     });

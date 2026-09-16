@@ -17,19 +17,32 @@ converted beforehand.  The format layouts are documented in
 
 ## Running
 
-`assets/` (the resource archive) is not committed - it is the property of the
-game's authors.  Fetch it first with the repository's setup script:
+No game data is committed - it is the property of its authors.  Fetch it with
+the repository's setup script, which leaves an **extracted resource tree** in
+`assets/`, the port's own copy of it here, and the loose JAR directories the
+game reads (`lists/`, `ui/`, `sounds/`):
 
 ```sh
-../../setup.sh                           # downloads the JAR, fills assets/
-cd rust/kora
-cargo run --release                      # main menu
+../../setup.sh                           # downloads the JAR, fills the trees
+cd rust/kora && cargo run --release      # main menu
 cargo test --release                     # headless checks
 ```
 
+The port reads `assets` **in the working directory**, so both of these work:
+
+```sh
+cd rust/kora && cargo run --release
+cargo run --release --manifest-path rust/kora/Cargo.toml   # from the root
+```
+
+Because that directory is a tree rather than the packed archive, swapping an
+asset is a matter of editing the file and running again.  Point `KORA_ASSETS` at
+`x` to read the archive the game actually shipped instead - the reader takes
+either form, and a test checks the two agree byte for byte.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `KORA_ASSETS` | `assets` | directory holding `data`, `data.*` and `lists/` |
+| `KORA_ASSETS` | `assets` | resource tree (or the `data`/`data.*` archive) to read |
 | `KORA_SAVE` | per-user data dir | file for points, best times and the chosen car |
 | `KORA_SETTINGS` | per-user config dir | file for the options screen's settings |
 | `KORA_DATA_DIR` | per-user data dir | overrides where the data directory is |
@@ -48,8 +61,11 @@ and in the menus the arrows move, **Enter** confirms and **Esc** goes back.
 
 ## What is implemented
 
-* **Resource archive reader** (`pack`) - index parse, per-page slicing,
-  length recovery from the next entry.
+* **Resource reader** (`pack`) - either form: the archive the game shipped
+  (`data` plus `data.<n>`, index parsed, pages sliced, lengths recovered from
+  the next entry) or an extracted tree, every file keyed by its path.  The port
+  reads the tree by default, because swapping an asset should not need a repack
+  step, and `KORA_ASSETS=x` reads the archive instead.
 * **Format parsers** (`format`) - mesh, `.tl` tile, `.map` layout, `.car`,
   `.ob`, `.hd`, `.md`, `.tab` font table and font metrics, mirroring the
   MIDlet classes.
@@ -137,6 +153,7 @@ and in the menus the arrows move, **Enter** confirms and **Esc** goes back.
 ## Layout
 
 ```
+assets/          the extracted resource tree (from ./setup.sh, not committed)
 fonts/           Contrail One + its OFL licence (bundled via include_bytes)
 labels.tsv       every string the interface draws, with its provenance
 src/music.rs     MIDI to WAV, for the theme

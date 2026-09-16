@@ -1452,8 +1452,13 @@ fn the_theme_renders_from_the_games_midi() {
 /// boundary overflows the page, and each page therefore starts at offset 1.
 #[test]
 fn the_archive_packing_rule_reproduces_every_offset() {
-    let dir = assets();
-    let resources = pack::load(&dir);
+    // This one is about the shipped archive itself, which lives beside the JAR.
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../x");
+    if !dir.join("data").exists() {
+        eprintln!("skipping: {} is not there (run ./setup.sh)", dir.display());
+        return;
+    }
+    let resources = pack::load_archive(&dir);
 
     let index = std::fs::read(dir.join("data")).expect("the archive index");
     let count = u16::from_be_bytes([index[0], index[1]]) as usize;
@@ -1514,6 +1519,52 @@ fn the_archive_packing_rule_reproduces_every_offset() {
         "only {over} of {pages} page files are longer than the page size, \
          which is not the archive this rule describes"
     );
+}
+
+/// The tree the port reads and the archive the game shipped have to agree byte
+/// for byte: one is the other, unpacked.  The tree carries the loose JAR
+/// directories on top, and nothing else.
+#[test]
+fn the_tree_and_the_archive_agree() {
+    use std::path::PathBuf;
+    let archive_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../x");
+    if !archive_dir.join("data").exists() {
+        eprintln!("skipping: {} is not there (run ./setup.sh)", archive_dir.display());
+        return;
+    }
+
+    let tree = pack::load(&assets());
+    let archive = pack::load_archive(&archive_dir);
+    assert_eq!(archive.len(), 668, "the shipped archive's resource count");
+
+    let mut differing = Vec::new();
+    for (name, data) in &archive {
+        match tree.get(name) {
+            Some(other) if other == data => {}
+            Some(_) => differing.push(format!("{name}: bytes differ")),
+            None => differing.push(format!("{name}: missing from the tree")),
+        }
+    }
+    assert!(
+        differing.is_empty(),
+        "{} of {} resources differ: {differing:?}",
+        differing.len(),
+        archive.len()
+    );
+
+    // Everything else in the tree is a loose JAR directory rather than a packed
+    // resource: the lists, the interface text, the theme.
+    let extra: Vec<&String> = tree
+        .keys()
+        .filter(|name| !archive.contains_key(*name))
+        .collect();
+    assert!(!extra.is_empty(), "the tree should carry the loose directories too");
+    for name in extra {
+        assert!(
+            name.starts_with("lists/") || name.starts_with("ui/") || name.starts_with("sounds/"),
+            "{name} is in the tree but is neither a resource nor a loose JAR file"
+        );
+    }
 }
 
 /// The settings round-trip, and every one of them changes something: a setting
