@@ -9,8 +9,18 @@
 use macroquad::prelude::*;
 
 use crate::campaign::RaceEvent;
-use crate::progress::{medal_name, CarInfo, Progress};
+use crate::progress::{medal_name, CarInfo, Progress, MAX_STAT, STAT_NAMES};
 use crate::text;
+
+/// The main menu, shared with `main` so the cursor and the labels agree.
+pub const MAIN_ITEMS: [&str; 6] = [
+    "CAREER",
+    "DELUXE",
+    "QUICK RACE",
+    "SELECT CAR",
+    "GARAGE",
+    "QUIT",
+];
 
 pub const BACKDROP: Color = Color::new(0.05, 0.07, 0.12, 1.0);
 const PANEL: Color = Color::new(1.0, 1.0, 1.0, 0.06);
@@ -51,7 +61,7 @@ pub fn draw_main(progress: &Progress, cursor: usize) {
         LOCKED,
     );
 
-    let items = ["CAREER", "QUICK RACE", "SELECT CAR", "QUIT"];
+    let items = MAIN_ITEMS;
     let row = 34.0;
     let top = screen_height() * 0.42;
     let width = 240.0;
@@ -119,46 +129,103 @@ pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, tit
 }
 
 /// The four stat bars `ba.a(car, stat)` feeds the garage display.
-pub fn draw_cars(cars: &[CarInfo], progress: &Progress, cursor: usize) {
-    centred("SELECT CAR", 12.0, 32.0, WHITE);
-    const LABELS: [&str; 4] = ["SPEED", "GRIP", "ACCEL", "WEIGHT"];
-    let row = 52.0;
-    let top = 60.0;
+///
+/// One function covers both car selection and the garage: pass `focus` as the
+/// stat index being upgraded to show the highlight and the price, or `None`
+/// for plain selection.  Bars show what the car actually has now, with
+/// anything bought in the garage picked out in gold.
+pub fn draw_cars(
+    cars: &[CarInfo],
+    progress: &Progress,
+    cursor: usize,
+    focus: Option<usize>,
+    message: &str,
+) {
+    let garage = focus.is_some();
+    centred(if garage { "GARAGE" } else { "SELECT CAR" }, 12.0, 32.0, WHITE);
+    centred(
+        &format!("CAREER POINTS {}", progress.points),
+        46.0,
+        17.0,
+        ACCENT,
+    );
+
+    let row = 62.0;
+    let top = 82.0;
     for (index, car) in cars.iter().enumerate() {
         let y = top + index as f32 * row;
         if index == cursor {
-            draw_rectangle(24.0, y - 6.0, screen_width() - 48.0, row - 8.0, HIGHLIGHT);
+            draw_rectangle(24.0, y - 8.0, screen_width() - 48.0, row - 10.0, HIGHLIGHT);
         }
-        let selected = index == progress.car;
+        let active = index == progress.car;
         text::draw_shadow(
             &car.name,
             32.0,
             y,
             23.0,
-            if selected { ACCENT } else { WHITE },
+            if active { ACCENT } else { WHITE },
         );
-        text::draw_shadow(&car.file, 400.0, y, 15.0, LOCKED);
-        for (stat, value) in car.stats.iter().enumerate() {
-            let by = y + 16.0 + stat as f32 * 9.0;
-            text::draw_shadow(LABELS[stat], 400.0, by, 12.0, LOCKED);
-            for segment in 0..6 {
-                let x = 470.0 + segment as f32 * 13.0;
-                let on = segment < *value;
-                draw_rectangle(
-                    x,
-                    by + 1.0,
-                    9.0,
-                    6.0,
-                    if on { ACCENT } else { Color::new(1.0, 1.0, 1.0, 0.12) },
-                );
+        if active {
+            text::draw_shadow("IN USE", 250.0, y + 4.0, 14.0, ACCENT);
+        }
+
+        let stats = progress.stats(&car.file, car.stats);
+        for (stat, value) in stats.iter().enumerate() {
+            let by = y + 22.0 + stat as f32 * 9.0;
+            let selected = garage && index == cursor && focus == Some(stat);
+            text::draw_shadow(
+                STAT_NAMES[stat],
+                330.0,
+                by,
+                if selected { 14.0 } else { 12.0 },
+                if selected { WHITE } else { LOCKED },
+            );
+            for segment in 0..MAX_STAT {
+                let x = 420.0 + segment as f32 * 13.0;
+                let bought = segment >= car.stats[stat];
+                let colour = if segment >= *value {
+                    Color::new(1.0, 1.0, 1.0, 0.12)
+                } else if bought {
+                    ACCENT
+                } else {
+                    Color::new(0.75, 0.80, 0.88, 1.0)
+                };
+                draw_rectangle(x, by + 1.0, 9.0, 7.0, colour);
+            }
+        }
+
+        if garage && index == cursor {
+            match progress.next_upgrade_cost(&car.file, car.stats, focus.unwrap()) {
+                Some(cost) => text::draw_shadow(
+                    &format!("ENTER: {} UPGRADE FOR {}", STAT_NAMES[focus.unwrap()], cost),
+                    32.0,
+                    y + row - 16.0,
+                    15.0,
+                    if cost <= progress.points { ACCENT } else { LOCKED },
+                ),
+                None => text::draw_shadow(
+                    &format!("{} IS AT MAXIMUM", STAT_NAMES[focus.unwrap()]),
+                    32.0,
+                    y + row - 16.0,
+                    15.0,
+                    LOCKED,
+                ),
             }
         }
     }
+
+    if !message.is_empty() {
+        text::draw_shadow(message, 32.0, screen_height() - 46.0, 17.0, WHITE);
+    }
     text::draw_shadow(
-        "ARROWS SELECT   ENTER CHOOSE   ESC BACK",
+        if garage {
+            "UP/DOWN CAR   LEFT/RIGHT STAT   ENTER BUY   ESC BACK"
+        } else {
+            "ARROWS SELECT   ENTER CHOOSE   ESC BACK"
+        },
         32.0,
         screen_height() - 22.0,
-        17.0,
+        15.0,
         LOCKED,
     );
 }

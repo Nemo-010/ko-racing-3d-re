@@ -15,17 +15,53 @@ pub struct CarControl {
     pub brake: bool,
 }
 
-const MAX_ENGINE_FORCE: f32 = 780.0;
-const MAX_BRAKE: f32 = 14.0;
-const MAX_STEER: f32 = 0.5;
 const CHASSIS_MASS: f32 = 1100.0;
+
+/// Per-car handling, derived from the four values a `.car` file carries and
+/// any upgrades bought in the garage.
+///
+/// The MIDlet only ever draws those four as bars - its car reads its own
+/// tuning from elsewhere, and the 39 bytes that follow the stats in every
+/// `.car` are never read by this build - so the mapping is the port's, chosen
+/// so the first car in the list (`rally.car`, stats 3/5/5/1) lands on the
+/// constants the port was calibrated with.  All four read as "more is better",
+/// which is what makes an upgrade unambiguous, and 6 is the ceiling because
+/// that is what the game's own best car, SPIRIT 320, carries.
+#[derive(Clone, Copy)]
+pub struct Tuning {
+    pub engine_force: f32,
+    pub linear_damping: f32,
+    pub steer: f32,
+    pub friction: f32,
+    pub brake: f32,
+}
+
+impl Default for Tuning {
+    fn default() -> Tuning {
+        Tuning::from_stats([3, 5, 5, 1])
+    }
+}
+
+impl Tuning {
+    /// `stats` are speed, grip, accel and brakes, each 1..=6 before upgrades.
+    pub fn from_stats(stats: [u8; 4]) -> Tuning {
+        let [speed, grip, accel, brakes] = stats.map(|value| value.clamp(1, 9) as f32);
+        Tuning {
+            engine_force: 560.0 + 60.0 * accel,
+            linear_damping: (0.26 - 0.02 * speed).max(0.05),
+            steer: 0.38 + 0.024 * grip,
+            friction: 0.75 + 0.13 * grip,
+            brake: 9.0 + 2.0 * brakes,
+        }
+    }
+}
 
 /// rapier's default tuning assumes a real-world car with ~0.5 m of suspension
 /// travel.  This car is only ~0.5 units tall, so the spring has to hold the
 /// chassis up over a much shorter travel: equilibrium compression is
 /// `g / (4 * stiffness)` regardless of mass, so stiffness ~24 keeps the body
 /// off the road instead of dragging along it.
-fn tuning() -> WheelTuning {
+fn wheel_tuning() -> WheelTuning {
     WheelTuning {
         suspension_stiffness: 24.0,
         suspension_compression: 1.6,
@@ -42,6 +78,7 @@ pub struct Car {
     controller: DynamicRayCastVehicleController,
     spawn: Vector,
     spawn_yaw: f32,
+    tuning: Tuning,
 }
 
 pub struct World {
@@ -84,22 +121,22 @@ impl World {
         }
     }
 
-    pub fn add_car(&mut self, spawn: Vec3, yaw: f32, half: Vec3) -> usize {
+    pub fn add_car(&mut self, spawn: Vec3, yaw: f32, half: Vec3, tuning: Tuning) -> usize {
         let (body, _) = self.physics.insert(
             RigidBodyBuilder::dynamic()
                 .translation(Vector::new(spawn.x, spawn.y, spawn.z))
                 .rotation(Vector::new(0.0, yaw, 0.0))
-                .linear_damping(0.15)
+                .linear_damping(tuning.linear_damping)
                 .angular_damping(2.5)
                 .ccd_enabled(true)
                 .can_sleep(false),
             ColliderBuilder::cuboid(half.x, half.y, half.z)
                 .mass(CHASSIS_MASS)
-                .friction(1.4),
+                .friction(tuning.friction),
         );
 
         let mut controller = DynamicRayCastVehicleController::new(body);
-        let tuning = tuning();
+        let wheels = wheel_tuning();
         let down = Vector::new(0.0, -1.0, 0.0);
         let axle = Vector::new(1.0, 0.0, 0.0);
         // The wheels hang from the top of the wheel well: the connection point
@@ -120,7 +157,7 @@ impl World {
                 axle,
                 suspension,
                 radius,
-                &tuning,
+                &wheels,
             );
         }
 
@@ -129,6 +166,7 @@ impl World {
             controller,
             spawn: Vector::new(spawn.x, spawn.y, spawn.z),
             spawn_yaw: yaw,
+            tuning,
         });
         self.cars.len() - 1
     }
@@ -139,10 +177,15 @@ impl World {
 
         let World { physics, cars } = self;
         for (car, control) in cars.iter_mut().zip(controls.iter()) {
+            let tuning = car.tuning;
             for (index, wheel) in car.controller.wheels_mut().iter_mut().enumerate() {
-                wheel.steering = if index < 2 { control.steer * MAX_STEER } else { 0.0 };
-                wheel.engine_force = control.throttle * MAX_ENGINE_FORCE;
-                wheel.brake = if control.brake { MAX_BRAKE } else { 0.0 };
+                wheel.steering = if index < 2 {
+                    control.steer * tuning.steer
+                } else {
+                    0.0
+                };
+                wheel.engine_force = control.throttle * tuning.engine_force;
+                wheel.brake = if control.brake { tuning.brake } else { 0.0 };
             }
             let filter = QueryFilter::default().exclude_rigid_body(car.body);
             let queries = physics.broad_phase.as_query_pipeline_mut(

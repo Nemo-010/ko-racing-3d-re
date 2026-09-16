@@ -72,14 +72,18 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
   lifted back onto the road surface when they sink below it (`World::lift_to`),
   which is what the MIDlet does every frame and what lets a car cross the steps
   between two tiles instead of being trapped by them.
-* **Menus** (`menu`) - main menu, the career event list, a quick-race list of
-  all 40 tracks, car selection with each car's four stat bars, a pause menu and
+* **Menus** (`menu`) - main menu, the career event list, the deluxe list, a
+  quick-race list of all 40 tracks, car selection, the garage, a pause menu and
   a results panel.  Locked events grey out and show the points they need.
 * **Career progress** (`progress`) - medals and points.  A race's entry
   threshold and award come from its `.000` record, the medal from the finishing
   position (gold, silver, bronze), and a better medal on a race already won
   only pays the difference so a race cannot be farmed.  Points and the chosen
   car are saved to `KORA_SAVE`.
+* **Garage** (`progress` + `menu`) - spend career points on any car's four
+  values, up to 6, which is the ceiling the game's own best car carries.  Each
+  purchase changes what the car is like to drive, and the upgrades are saved
+  with the rest of the progress.
 * **HUD** (`text`) - lap, position, total time, current and best lap.
 
 ## Layout
@@ -130,6 +134,34 @@ macroquad context.
 | `career_and_quick_lists_are_built` | the 47 career events, the 40 quick-race tracks and the 8 cars |
 | `a_race_runs_to_the_flag_and_scores` | a whole 2-lap race with four AI cars, scored as the results screen does |
 | `the_bundled_font_covers_the_interface` | the bundled face parses, covers every character the UI builds, and rasterises |
+| `the_garage_sells_upgrades_for_career_points` | prices, the ceiling, per-car isolation and the save round trip |
+| `the_deluxe_campaign_opens_on_points_alone` | the 13 deluxe events are extra tracks, opened by points with nothing else consulted |
+| `car_stats_change_the_handling` | each of the four values moves its own part of the tuning |
+| `upgrades_make_a_car_quicker` | a maxed car reaches a higher speed than a stock one |
+
+## No paywall, no server
+
+The original gates its deluxe campaign behind an SMS purchase: `cv` checks an
+entitlement flag (`al.h()`) and, when it is clear, shows the purchase screens,
+and `br` sets that flag after the payment flow.  It also ships an Online Tour
+whose leaderboards talk to `koragame.com`, a host that has been gone for years,
+plus a Vserv ad SDK and a Bluetooth mode.
+
+**None of that is reproduced.**  The deluxe levels are simply a second list in
+the port, opened by career points exactly like the career ones, and the game
+makes no network request of any kind - the dependency list is macroquad and
+rapier3d, and a grep for anything socket-shaped in `src/` finds only this
+paragraph's own subject.  Everything is earned by racing and kept in a local
+text file.
+
+The garage is the port's own feature rather than a ported one: the original has
+no economy at all (there is no price, cost or purchase anywhere in its 126
+classes), its "garage" `co` is a 3D car viewer, and the four values in each
+`.car` only ever reach the bars on the setup screen - the 39 bytes that follow
+them are never read by this build.  So the mapping from those four values to
+engine, damping, steering, friction and brakes is the port's, chosen so the
+first car in `ba.a`'s list lands on the constants the port was calibrated with;
+`physics::Tuning` documents it.
 
 ## Text
 
@@ -198,7 +230,7 @@ as-is.
 ## Not implemented
 
 * the mid-race HUD of the original (its rival-position arrows, speedometer and
-  minimap) and the garage's car upgrades; the `.bck` backgrounds;
+  minimap); the `.bck` backgrounds;
 * the original's own menu art and text, which live in packed images and text
   blobs - the port draws its screens from the tables instead;
 * the exact original medal rule: the tables give each race an entry threshold
@@ -208,4 +240,5 @@ as-is.
   the Bluetooth/Vserv/SMS code paths;
 
 * class `ai`'s per-object orientation matrices are simplified to a yaw for
-  high-detail scenery.
+  high-detail scenery;
+* the original's paid and online features, deliberately: see above.

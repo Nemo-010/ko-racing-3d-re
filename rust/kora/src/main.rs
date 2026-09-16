@@ -18,7 +18,7 @@ use macroquad::prelude::*;
 use kora::ai::AiDriver;
 use kora::campaign::{self, RaceEvent};
 use kora::menu::{self, Outcome};
-use kora::physics::{CarControl, World};
+use kora::physics::{CarControl, Tuning, World};
 use kora::progress::{self, Progress};
 use kora::race::Race;
 use kora::text;
@@ -49,8 +49,10 @@ fn env_number(name: &str, max: u32) -> Option<u32> {
 enum Screen {
     Main,
     Career,
+    Deluxe,
     Quick,
     Cars,
+    Garage,
     Race,
     Paused,
     Results,
@@ -102,6 +104,7 @@ fn start_race(
     dir: &PathBuf,
     event: &RaceEvent,
     car_file: &str,
+    progress: &Progress,
     back: Screen,
 ) -> Option<Running> {
     let mut track = scene::build_themed(dir, resources, &event.map, event.theme);
@@ -112,6 +115,8 @@ fn start_race(
         .and_then(|bytes| kora::format::Car::parse(bytes))?;
     let geometry = scene::build_car(resources, &car_def)?;
     let texture = scene::load_car_texture(resources, &geometry);
+    // Anything bought in the garage changes the car the race is driven in.
+    let tuning = Tuning::from_stats(progress.stats(car_file, car_def.stats));
 
     let laps = env_number("KORA_LAPS", 99).unwrap_or(event.laps).max(1);
     let opponents = env_number("KORA_OPPONENTS", 7).unwrap_or(event.opponents);
@@ -123,7 +128,7 @@ fn start_race(
     );
     let mut player = 0;
     for (index, &(spot, yaw)) in track.grid.grid_slots(1 + opponents as usize).iter().enumerate() {
-        let car = world.add_car(spot, yaw, geometry.half_extents);
+        let car = world.add_car(spot, yaw, geometry.half_extents, tuning);
         if index == 0 {
             player = car;
         }
@@ -343,12 +348,27 @@ async fn main() {
     println!("  {} resources indexed", resources.len());
 
     let cars = progress::car_infos(&resources);
-    let career = campaign::events(&resources);
+    // The two career tables are listed separately, the way the original has
+    // one screen for the campaign and another for the deluxe levels.  Unlike
+    // the original, the deluxe list is gated by career points rather than by
+    // an SMS purchase: nothing here needs a server or a payment.
+    let all_events = campaign::events(&resources);
+    let career: Vec<RaceEvent> = all_events
+        .iter()
+        .filter(|event| event.table.ends_with("campaign"))
+        .cloned()
+        .collect();
+    let deluxe: Vec<RaceEvent> = all_events
+        .iter()
+        .filter(|event| event.table.ends_with("deluxe"))
+        .cloned()
+        .collect();
     let quick = campaign::quick_events(&resources);
     println!(
-        "  {} cars, {} career events, {} quick-race tracks",
+        "  {} cars, {} career events, {} deluxe events, {} quick-race tracks",
         cars.len(),
         career.len(),
+        deluxe.len(),
         quick.len()
     );
 
@@ -366,6 +386,7 @@ async fn main() {
     // shell and keeps the environment overrides meaningful.
     let mut screen = Screen::Main;
     let mut cursor = 0usize;
+    let mut stat_cursor = 0usize;
     let mut running: Option<Running> = None;
     let mut message = String::new();
 
@@ -381,7 +402,7 @@ async fn main() {
                 .get(progress.car)
                 .map(|car| car.file.clone())
                 .unwrap_or_else(|| "rally.car".to_string());
-            running = start_race(&resources, &dir, &event, &file, Screen::Quick);
+            running = start_race(&resources, &dir, &event, &file, &progress, Screen::Quick);
             if running.is_some() {
                 screen = Screen::Race;
             }
@@ -398,11 +419,12 @@ async fn main() {
                 if !message.is_empty() {
                     text::draw_shadow(&message, 16.0, screen_height() - 44.0, 19.0, WHITE);
                 }
+                let items = menu::MAIN_ITEMS.len();
                 if is_key_pressed(KeyCode::Up) {
-                    cursor = (cursor + 3) % 4;
+                    cursor = (cursor + items - 1) % items;
                 }
                 if is_key_pressed(KeyCode::Down) {
-                    cursor = (cursor + 1) % 4;
+                    cursor = (cursor + 1) % items;
                 }
                 if is_key_pressed(KeyCode::Enter) {
                     message.clear();
@@ -413,22 +435,31 @@ async fn main() {
                         }
                         1 => {
                             cursor = 0;
-                            screen = Screen::Quick;
+                            screen = Screen::Deluxe;
                         }
                         2 => {
+                            cursor = 0;
+                            screen = Screen::Quick;
+                        }
+                        3 => {
                             cursor = progress.car.min(cars.len().saturating_sub(1));
                             screen = Screen::Cars;
+                        }
+                        4 => {
+                            cursor = progress.car.min(cars.len().saturating_sub(1));
+                            stat_cursor = 0;
+                            screen = Screen::Garage;
                         }
                         _ => break,
                     }
                 }
             }
 
-            Screen::Career | Screen::Quick => {
-                let (events, title) = if screen == Screen::Career {
-                    (&career, "CAREER")
-                } else {
-                    (&quick, "QUICK RACE")
+            Screen::Career | Screen::Deluxe | Screen::Quick => {
+                let (events, title) = match screen {
+                    Screen::Career => (&career, "CAREER"),
+                    Screen::Deluxe => (&deluxe, "DELUXE"),
+                    _ => (&quick, "QUICK RACE"),
                 };
                 if events.is_empty() {
                     screen = Screen::Main;
@@ -454,7 +485,8 @@ async fn main() {
                                 .get(progress.car)
                                 .map(|car| car.file.clone())
                                 .unwrap_or_else(|| "rally.car".to_string());
-                            running = start_race(&resources, &dir, &event, &file, screen);
+                            running =
+                                start_race(&resources, &dir, &event, &file, &progress, screen);
                             if running.is_some() {
                                 screen = Screen::Race;
                             } else {
@@ -470,7 +502,7 @@ async fn main() {
                     screen = Screen::Main;
                 } else {
                     cursor = cursor.min(cars.len() - 1);
-                    menu::draw_cars(&cars, &progress, cursor);
+                    menu::draw_cars(&cars, &progress, cursor, None, "");
                     if is_key_pressed(KeyCode::Up) {
                         cursor = cursor.saturating_sub(1);
                     }
@@ -487,6 +519,60 @@ async fn main() {
                         message = format!("{} selected", cars[cursor].name);
                         cursor = 0;
                         screen = Screen::Main;
+                    }
+                }
+            }
+
+            Screen::Garage => {
+                if cars.is_empty() {
+                    screen = Screen::Main;
+                } else {
+                    cursor = cursor.min(cars.len() - 1);
+                    let stat = stat_cursor.min(3);
+                    menu::draw_cars(&cars, &progress, cursor, Some(stat), &message);
+
+                    if is_key_pressed(KeyCode::Up) {
+                        cursor = cursor.saturating_sub(1);
+                    }
+                    if is_key_pressed(KeyCode::Down) {
+                        cursor = (cursor + 1).min(cars.len() - 1);
+                    }
+                    if is_key_pressed(KeyCode::Left) {
+                        stat_cursor = stat.saturating_sub(1);
+                    }
+                    if is_key_pressed(KeyCode::Right) {
+                        stat_cursor = (stat + 1).min(3);
+                    }
+                    if is_key_pressed(KeyCode::Escape) {
+                        cursor = 0;
+                        message.clear();
+                        screen = Screen::Main;
+                    }
+                    if is_key_pressed(KeyCode::Enter) {
+                        let file = cars[cursor].file.clone();
+                        let base = cars[cursor].stats;
+                        let name = cars[cursor].name.clone();
+                        match progress.buy_upgrade(&file, base, stat) {
+                            Some(cost) => {
+                                progress.save(&save_path);
+                                message = format!(
+                                    "{} {} UPGRADED FOR {} POINTS",
+                                    name,
+                                    progress::STAT_NAMES[stat].to_lowercase(),
+                                    cost
+                                );
+                            }
+                            None => {
+                                message = if progress.next_upgrade_cost(&file, base, stat).is_none() {
+                                    format!("{} IS AT MAXIMUM", progress::STAT_NAMES[stat])
+                                } else {
+                                    format!(
+                                        "NEED {} POINTS FOR THAT UPGRADE",
+                                        progress.next_upgrade_cost(&file, base, stat).unwrap_or(0)
+                                    )
+                                };
+                            }
+                        }
                     }
                 }
             }

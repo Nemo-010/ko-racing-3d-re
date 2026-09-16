@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use macroquad::prelude::{vec3, Vec3};
-use kora::physics::{CarControl, World};
+use kora::physics::{CarControl, Tuning, World};
 use kora::{format, pack, scene};
 
 fn assets() -> PathBuf {
@@ -142,7 +142,7 @@ fn car_settles_and_drives_on_the_track() {
         ..
     } = track;
     let mut world = World::new(collision_vertices, collision_indices, &walls);
-    let player = world.add_car(spawn, spawn_yaw, geometry.half_extents);
+    let player = world.add_car(spawn, spawn_yaw, geometry.half_extents, Tuning::default());
 
     let idle = [CarControl::default()];
     for _ in 0..240 {
@@ -307,7 +307,7 @@ fn laps_require_checkpoints_in_order() {
 #[test]
 fn opponents_drive_the_track() {
     use kora::grid::Grid;
-    use kora::physics::{CarControl, World};
+    use kora::physics::{CarControl, Tuning, World};
     use kora::race::Race;
     let dir = assets();
     let resources = pack::load(&dir);
@@ -329,7 +329,7 @@ fn opponents_drive_the_track() {
 
     let mut world = World::new(collision_vertices, collision_indices, &walls);
     for &(spot, yaw) in grid.grid_slots(4).iter() {
-        world.add_car(spot, yaw, geometry.half_extents);
+        world.add_car(spot, yaw, geometry.half_extents, Tuning::default());
     }
     let cars = world.cars.len();
     let _ = (spawn, spawn_yaw);
@@ -400,7 +400,7 @@ fn opponents_drive_the_track() {
 #[test]
 fn opponents_survive_other_tracks() {
     use kora::ai::AiDriver;
-    use kora::physics::{CarControl, World};
+    use kora::physics::{CarControl, Tuning, World};
     let dir = assets();
     let resources = pack::load(&dir);
     let car = format::Car::parse(&resources["cars/rally.car"]).unwrap();
@@ -419,7 +419,7 @@ fn opponents_survive_other_tracks() {
         } = track;
         let mut world = World::new(collision_vertices, collision_indices, &walls);
         for &(spot, yaw) in grid.grid_slots(3).iter() {
-            world.add_car(spot, yaw, geometry.half_extents);
+            world.add_car(spot, yaw, geometry.half_extents, Tuning::default());
         }
         let cars = world.cars.len();
         let mut drivers: Vec<AiDriver> =
@@ -643,7 +643,7 @@ fn collision_meshes_give_tracks_elevation() {
 #[test]
 fn cars_climb_the_track_elevation() {
     use kora::ai::AiDriver;
-    use kora::physics::{CarControl, World};
+    use kora::physics::{CarControl, Tuning, World};
     let dir = assets();
     let resources = pack::load(&dir);
     let car = format::Car::parse(&resources["cars/rally.car"]).unwrap();
@@ -661,7 +661,7 @@ fn cars_climb_the_track_elevation() {
     } = track;
     let mut world = World::new(collision_vertices, collision_indices, &walls);
     for &(spot, yaw) in grid.grid_slots(2).iter() {
-        world.add_car(spot, yaw, geometry.half_extents);
+        world.add_car(spot, yaw, geometry.half_extents, Tuning::default());
     }
     let cars = world.cars.len();
     let ride = geometry.half_extents.y + 0.02;
@@ -780,7 +780,7 @@ fn career_and_quick_lists_are_built() {
 #[test]
 fn a_race_runs_to_the_flag_and_scores() {
     use kora::ai::AiDriver;
-    use kora::physics::{CarControl, World};
+    use kora::physics::{CarControl, Tuning, World};
     use kora::progress::{medal_for_place, Progress};
     use kora::race::Race;
 
@@ -800,7 +800,7 @@ fn a_race_runs_to_the_flag_and_scores() {
     } = track;
     let mut world = World::new(collision_vertices, collision_indices, &walls);
     for &(spot, yaw) in grid.grid_slots(4).iter() {
-        world.add_car(spot, yaw, geometry.half_extents);
+        world.add_car(spot, yaw, geometry.half_extents, Tuning::default());
     }
     let cars = world.cars.len();
     let laps = 2;
@@ -913,4 +913,179 @@ fn the_bundled_font_covers_the_interface() {
     let (metrics, bitmap) = font.rasterize('A', 32.0);
     assert!(metrics.width > 4 && metrics.height > 4, "A at 32px is {metrics:?}");
     assert!(bitmap.iter().any(|byte| *byte > 0), "A rasterised blank");
+}
+
+/// The garage: prices scale with the stat, purchases are capped, points come
+/// out of the career total and everything survives a save.
+#[test]
+fn the_garage_sells_upgrades_for_career_points() {
+    use kora::progress::{self, Progress, MAX_STAT};
+    let resources = pack::load(&assets());
+    let cars = progress::car_infos(&resources);
+    let rally = cars.iter().find(|car| car.file == "rally.car").unwrap();
+    let base = rally.stats;
+
+    let mut progress = Progress::default();
+    assert_eq!(progress.stats("rally.car", base), base, "nothing bought yet");
+    assert_eq!(
+        progress.buy_upgrade("rally.car", base, 3),
+        None,
+        "no points, no upgrade"
+    );
+
+    progress.points = 100;
+    let before = progress.stats("rally.car", base)[3];
+    let cost = progress.next_upgrade_cost("rally.car", base, 3).unwrap();
+    assert_eq!(cost, progress::upgrade_cost(before));
+    assert_eq!(progress.buy_upgrade("rally.car", base, 3), Some(cost));
+    assert_eq!(progress.stats("rally.car", base)[3], before + 1);
+    assert_eq!(progress.points, 100 - cost);
+    for stat in 0..4 {
+        if stat != 3 {
+            assert_eq!(
+                progress.stats("rally.car", base)[stat],
+                base[stat],
+                "buying one stat must not move the others"
+            );
+        }
+    }
+
+    // Take one stat to the ceiling and it stops there.
+    let mut spent = 0;
+    while let Some(cost) = progress.next_upgrade_cost("rally.car", base, 0) {
+        progress.points = cost;
+        assert!(progress.buy_upgrade("rally.car", base, 0).is_some());
+        spent += cost;
+    }
+    assert_eq!(progress.stats("rally.car", base)[0], MAX_STAT);
+    assert!(spent > 0, "reaching the ceiling should cost something");
+    progress.points = 1000;
+    assert_eq!(
+        progress.buy_upgrade("rally.car", base, 0),
+        None,
+        "the ceiling holds"
+    );
+
+    let path = std::env::temp_dir().join("kora-garage-test.txt");
+    progress.save(&path);
+    let loaded = Progress::load(&path);
+    assert_eq!(loaded.stats("rally.car", base)[0], MAX_STAT);
+    assert_eq!(loaded.stats("rally.car", base)[3], before + 1);
+    assert_eq!(loaded.points, 1000, "saving keeps the balance");
+    let other = cars.iter().find(|car| car.file == "suv.car").unwrap();
+    assert_eq!(
+        loaded.stats(&other.file, other.stats),
+        other.stats,
+        "upgrades are per car"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The deluxe levels are a second campaign, opened by career points alone.
+/// The port has no entitlement flag, purchase or server behind them, unlike
+/// the original, which gates them behind an SMS unlock.
+#[test]
+fn the_deluxe_campaign_opens_on_points_alone() {
+    use kora::campaign;
+    use kora::progress::Progress;
+    let resources = pack::load(&assets());
+    let all = campaign::events(&resources);
+
+    let deluxe: Vec<_> = all.iter().filter(|e| e.table.ends_with("deluxe")).collect();
+    let career: Vec<_> = all.iter().filter(|e| e.table.ends_with("campaign")).collect();
+    assert_eq!(deluxe.len(), 13, "the deluxe table's levels");
+    assert_eq!(career.len(), 34);
+
+    let career_maps: std::collections::HashSet<_> =
+        career.iter().map(|e| e.map.clone()).collect();
+    let deluxe_maps: std::collections::HashSet<_> =
+        deluxe.iter().map(|e| e.map.clone()).collect();
+    assert!(deluxe_maps.contains("3.map") && deluxe_maps.contains("13.map"));
+    assert!(
+        !deluxe_maps.is_subset(&career_maps),
+        "the deluxe table has to add tracks, not repeat the career"
+    );
+
+    // A brand new save can already enter the first deluxe event; the rest open
+    // as points come in.  Nothing else is consulted.
+    let mut progress = Progress::default();
+    let first = deluxe.iter().map(|e| e.threshold).min().unwrap();
+    let last = deluxe.iter().map(|e| e.threshold).max().unwrap();
+    assert!(first <= 1, "the first deluxe event should be open at once");
+    assert!(progress.open(first));
+    assert!(!progress.open(last), "the last one needs points");
+    progress.points = last.max(1) as u32;
+    assert!(progress.open(last), "and points alone open it");
+}
+
+/// The four `.car` values reach the handling: more is better in all of them,
+/// so an upgrade can only help.
+#[test]
+fn car_stats_change_the_handling() {
+    use kora::physics::Tuning;
+    let slow = Tuning::from_stats([1, 1, 1, 1]);
+    let mid = Tuning::from_stats([3, 5, 5, 3]);
+    let fast = Tuning::from_stats([6, 6, 6, 6]);
+
+    assert!(slow.engine_force < mid.engine_force && mid.engine_force < fast.engine_force);
+    assert!(slow.steer < mid.steer && mid.steer < fast.steer);
+    assert!(slow.friction < mid.friction && mid.friction < fast.friction);
+    assert!(slow.brake < mid.brake && mid.brake < fast.brake);
+    // Each stat moves its own thing: the brakes follow the fourth value only.
+    assert_eq!(
+        Tuning::from_stats([1, 5, 5, 1]).brake,
+        Tuning::from_stats([6, 5, 5, 1]).brake,
+        "the speed stat must not change the brakes"
+    );
+    // Top speed comes from lower damping, so the speed stat is not just more
+    // engine force.
+    assert!(fast.linear_damping < mid.linear_damping);
+    assert!(mid.linear_damping < slow.linear_damping);
+
+    // The default is the first car `ba.a` lists.
+    let default = Tuning::default();
+    let rally = Tuning::from_stats([3, 5, 5, 1]);
+    assert_eq!(default.engine_force, rally.engine_force);
+    assert_eq!(default.steer, rally.steer);
+}
+
+/// And an upgraded car really does go quicker, and still drives a track.
+#[test]
+fn upgrades_make_a_car_quicker() {
+    use kora::physics::{CarControl, Tuning, World};
+    let dir = assets();
+    let resources = pack::load(&dir);
+    let car = format::Car::parse(&resources["cars/rally.car"]).unwrap();
+    let geometry = scene::build_car(&resources, &car).unwrap();
+
+    let run = |tuning: Tuning| -> f32 {
+        let track = scene::build(&dir, &resources, "1.map");
+        let scene::Track {
+            collision_vertices,
+            collision_indices,
+            walls,
+            spawn,
+            spawn_yaw,
+            ..
+        } = track;
+        let mut world = World::new(collision_vertices, collision_indices, &walls);
+        world.add_car(spawn, spawn_yaw, geometry.half_extents, tuning);
+        let flat_out = [CarControl {
+            throttle: 1.0,
+            ..Default::default()
+        }];
+        // Long enough to build speed, short enough not to reach the first
+        // corner and spoil the comparison with a barrier.
+        for _ in 0..90 {
+            world.step(1.0 / 60.0, &flat_out);
+        }
+        world.speed(0)
+    };
+
+    let stock = run(Tuning::from_stats([3, 5, 5, 1]));
+    let maxed = run(Tuning::from_stats([6, 6, 6, 6]));
+    assert!(
+        maxed > stock,
+        "a maxed car should be quicker: {maxed:.2} against {stock:.2}"
+    );
 }

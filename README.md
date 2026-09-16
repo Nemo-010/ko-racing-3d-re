@@ -220,7 +220,9 @@ a collision world taken from each tile's collision mesh, so ramps and
 platforms are real; a rapier raycast vehicle for the player plus AI opponents
 that follow the road; lap, checkpoint and timing rules; and menus - main menu,
 career event list, quick race, car selection with stat bars, pause and results
-- with medals and career points saved between runs.  On-screen text is set in
+- with a garage that spends career points on car upgrades, and the deluxe
+campaign's 13 extra levels opened by points rather than by the original's SMS
+purchase.  No paywall and no network code of any kind.  On-screen text is set in
 Contrail One (SIL Open Font License, bundled in `rust/kora/fonts/`) and
 rasterised by macroquad, rather than the pack's bitmap fonts, which the tooling
 still decodes.  `cargo test --release`
@@ -233,6 +235,7 @@ upgrades and the original's menu artwork.  See
 
 ## Suggested next steps
 
-1. The garage: car upgrades and the deluxe campaign's extra levels.
+1. The original's mid-race HUD extras (rival-position arrows, speedometer,
+   minimap) and the `.bck` sky/background resource.
 4. Repack support: the pack format is simple enough to write, enabling
    asset swaps or a JAR rebuild.
