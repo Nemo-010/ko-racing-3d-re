@@ -103,8 +103,18 @@ impl Model {
             let x = r.i8() as f32;
             let y = r.i8() as f32;
             let z = r.i8() as f32;
-            let u = r.u8() as f32;
-            let v = r.u8() as f32;
+            // The texture components are **signed** bytes, like the positions:
+            // `at.java` reads every component with the unsigned `be.a` and
+            // stores it into a Java `byte[]`, so values above 127 arrive
+            // negative, and M3G decodes that array as signed (`new
+            // VertexArray(n, 2, 1)` - component type 1 is BYTE).  The
+            // `128 * scale + bias` offset is what maps [-128, 127] back onto
+            // 0..1.  Reading them unsigned shifted every texel whose byte
+            // topped 127 by `256 * scale` - a full wrap, since the shipped
+            // scales sit near 1/256 - which smeared the car liveries across
+            // their bodies.
+            let u = r.i8() as f32;
+            let v = r.i8() as f32;
             positions.push([
                 pos_scale * x + pos_offset,
                 pos_scale * y + pos_offset,

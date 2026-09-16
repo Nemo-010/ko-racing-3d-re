@@ -17,7 +17,10 @@ Layout::
     u8           vertex_count
     repeat vertex_count:
         i8 x, i8 y, i8 z            # position, signed byte
-        u8 u, u8 v                  # texture coordinate, unsigned byte
+        i8 u, i8 v                  # texture coordinate, signed byte: the
+                                    # file stores it unsigned but the MIDlet
+                                    # keeps it in a Java byte[], and M3G decodes
+                                    # that as signed (component type 1 = BYTE)
     u8           strip_count
     repeat strip_count:
         u8       strip_length
@@ -43,10 +46,13 @@ viewer that wants Y-up should map ``(x, y, z) -> (x, -z, -y)``; copying z instea
 hangs the whole world under the road, cars included.  ``python3 -m kora view``
 renders a track the port built and is the quickest way to see it.
 
-The texture coordinates come out centred on zero and often outside 0..1,
-because M3G - like the OpenGL underneath it - wraps a lookup rather than
-clamping it.  They are exported exactly as the mesh stores them, so a viewer
-that clamps instead of wrapping will show the wrong texels.
+The texture coordinates land inside 0..1 for the cars and for the tile-atlas
+sub-rectangles, because the signed bytes and the ``128 * scale + bias`` offset
+line up that way - which is what that offset is for.  Reading the bytes
+unsigned instead adds ``256 * scale`` to every component above 127, a full
+wrap, and puts each car's rear on its nose.  A few scenery models genuinely
+wrap (``zdzn`` spans u 0..8), since M3G - like the OpenGL under it - repeats a
+lookup rather than clamping, so a viewer that clamps shows those wrong.
 
 A ``_r`` suffix in a model name (e.g. ``rally_r``) marks the mirrored copy
 used for the render-to-texture reflection, and is parsed identically.
@@ -59,7 +65,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 _RESERVED = 3
-_VERTEX = struct.Struct(">bbbBB")       # x, y, z, u, v
+_VERTEX = struct.Struct(">bbbbb")       # x, y, z, u, v - all signed bytes
 _TEXCOORD_SCALE = 128.0
 
 

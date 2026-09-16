@@ -2327,3 +2327,80 @@ fn the_tile_atlas_follows_the_weather() {
         assert!(resources.contains_key(&path), "{path} is missing");
     }
 }
+
+/// Mesh texture coordinates are **signed** bytes, and `128 * scale + bias`
+/// maps them onto 0..1: the file stores them unsigned, the MIDlet keeps them in
+/// a Java `byte[]`, and M3G decodes that as signed (`new VertexArray(n, 2, 1)`
+/// - component type 1 is BYTE).
+///
+/// Reading them unsigned adds `256 * scale` to every component whose byte tops
+/// 127, which is a full wrap because the shipped scales sit near 1/256: paint
+/// from one side of a car's sheet lands on the other, so tail lights appeared
+/// on the nose and tyres along the flanks.  Nothing here caught it for a long
+/// time, because every other texture test asks *which picture* the coordinates
+/// land on - and a full wrap lands on the same picture.  This one asks where
+/// they are, which is the question that distinguishes the two.
+///
+/// A few scenery models wrap deliberately (`zdzn` spans u 0..8) and the odd
+/// tile crosses its atlas edge by a hundredth (`t1` reaches u -0.018), which
+/// `Tiling` is there for; a tile that came out a whole texture away is the bug.
+#[test]
+fn car_and_tile_unwraps_stay_inside_their_texture() {
+    let resources = pack::load(&assets());
+    let tolerance = 0.01;
+
+    let mut cars = 0;
+    for (name, data) in resources.iter() {
+        if !name.starts_with("cars/") || !name.ends_with(".car") {
+            continue;
+        }
+        let car = format::Car::parse(data).unwrap();
+        let Some(model) = resources
+            .get(&format!("models/{}", car.model))
+            .and_then(|bytes| format::Model::parse(bytes))
+        else {
+            continue;
+        };
+        for (index, [u, v]) in model.texcoords.iter().enumerate() {
+            assert!(
+                (-tolerance..=1.0 + tolerance).contains(u)
+                    && (-tolerance..=1.0 + tolerance).contains(v),
+                "{name} ({}): vertex {index} unwraps to ({u:.3}, {v:.3}), outside \
+                 the sheet - the texture bytes are being read unsigned",
+                car.model
+            );
+        }
+        cars += 1;
+    }
+    assert!(cars >= 8, "expected the car set, saw {cars}");
+
+    // The tile atlas pieces the tracks are built from, which the same reader
+    // feeds and the same mistake moved.
+    let tiles = pack::lines(&pack::read_jar_file(&assets(), "lists/tile_list"));
+    let mut checked = 0;
+    for file in tiles {
+        let Some(tile) = resources
+            .get(&format!("tiles/{file}"))
+            .and_then(|bytes| format::Tile::parse(bytes))
+        else {
+            continue;
+        };
+        let Some(model) = resources
+            .get(&format!("models/p/{}", tile.name))
+            .and_then(|bytes| format::Model::parse(bytes))
+        else {
+            continue;
+        };
+        let spill = 0.35;
+        for [u, v] in model.texcoords.iter() {
+            assert!(
+                (-spill..=1.0 + spill).contains(u) && (-spill..=1.0 + spill).contains(v),
+                "tile {}: unwraps to ({u:.3}, {v:.3}), most of a texture away \
+                 from the atlas - the bytes are being read unsigned",
+                tile.name
+            );
+        }
+        checked += 1;
+    }
+    assert!(checked > 20, "expected the tile set, saw {checked}");
+}

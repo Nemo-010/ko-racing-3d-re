@@ -515,10 +515,16 @@ anywhere**.  (A vertical flip still samples a picture, just the wrong one, so
 `car_texture_coordinates_land_on_the_car` checks that the triangles land on the
 bodywork and the livery rather than the empty field beside it.)
 
-The models were authored against OpenGL's default `GL_REPEAT` and rely on it:
-the coordinates are centred on zero and leave 0..1 in both axes - a track tile
-spans u 0.39..1.50, a car's unwrap u 0.54..1.41 with negative v - because the
-authors let the lookup wrap round the image.  macroquad has no wrap mode at all
+The game leaves every texture on the default `WRAP_REPEAT` (`cq` sets 241/241
+explicitly, `at` never touches it), and a few scenery models genuinely rely on
+it - `zdzn` spans u 0..8.  **Cars and track tiles do not**: their coordinates
+land inside 0..1 once the mesh bytes are decoded as *signed*, which the file
+stores them as and which `at.java` confirms (`new VertexArray(n, 2, 1)`;
+component type 1 is BYTE).  An earlier version of this port read them unsigned,
+which added `256 * scale` to every component whose byte topped 127 - a full
+wrap, since the shipped scales sit near 1/256 - and painted each car's tail
+lights on its nose and its tyres along its flanks.  So the 0..1 claim below
+holds for the cars and the tile atlas; only the scenery wraps.  macroquad has no wrap mode at all
 (miniquad's texture parameters default to `Clamp` and nothing exposes them), and
 clamping smears an edge pixel across every polygon that leaves 0..1, which is
 what turned the tracks into a mess.
