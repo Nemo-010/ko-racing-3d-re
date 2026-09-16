@@ -36,6 +36,30 @@ use crate::format;
 use crate::grid::Grid;
 use crate::pack::{self, Resources};
 
+/// The atlas a tile texture really means, which depends on the weather.
+///
+/// `ar.a(cf)` reads the tile's texture name and then, when it is the shared
+/// atlas `texpack.png`, swaps in a recoloured one for the race's weather:
+/// `ts.png` for snow, `td.png` for desert, `tf.png` for autumn.  The four share
+/// a layout and differ in colour, which is why using the wrong one does not
+/// look broken so much as *wrong* - green hills where the game shows autumn
+/// ones.  `KORA_ATLAS` overrides it, which is how to try the others.
+pub fn tile_atlas(theme: u8, texture: &str) -> String {
+    if texture != "texpack.png" {
+        return format!("tex/{texture}");
+    }
+    if let Ok(forced) = std::env::var("KORA_ATLAS") {
+        return format!("tex/{forced}");
+    }
+    let swapped = match theme {
+        2 => "ts.png",
+        3 => "td.png",
+        4 => "tf.png",
+        _ => "texpack.png",
+    };
+    format!("tex/{swapped}")
+}
+
 /// One of the game's vertices, in macroquad's Y-up world.
 ///
 /// The game's models have **Z pointing down** - see the module comment - so the
@@ -527,7 +551,7 @@ pub fn build_detailed(
                     if let Some(tile) = tiles.get(&kind) {
                         builder.place(
                             &format!("models/p/{}", tile.name),
-                            &format!("tex/{}", tile.texture),
+                            &tile_atlas(theme, &tile.texture),
                             [WORLD_SCALE; 3],
                             arg as f32 * half,
                             [ox, oy, 0.0],

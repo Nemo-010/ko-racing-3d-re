@@ -2300,3 +2300,30 @@ fn the_game_z_axis_points_down() {
     }
     assert!(cars >= 20, "expected the whole car set, saw {cars}");
 }
+
+/// The tile atlas is swapped by weather.  `ar.a(cf)` reads the tile's texture
+/// name and, when it is the shared `texpack.png`, substitutes `ts.png` for
+/// snow, `td.png` for desert and `tf.png` for autumn.  The four share a layout
+/// and differ in colour, so using the wrong one does not look broken - it looks
+/// like the wrong season, which is exactly what it is.
+///
+/// The race's theme byte indexes the game's own weather list, `al.a`:
+/// clear, rain, snow, desert, autumn.
+#[test]
+fn the_tile_atlas_follows_the_weather() {
+    use kora::scene::tile_atlas;
+
+    assert_eq!(tile_atlas(0, "texpack.png"), "tex/texpack.png", "clear");
+    assert_eq!(tile_atlas(1, "texpack.png"), "tex/texpack.png", "rain");
+    assert_eq!(tile_atlas(2, "texpack.png"), "tex/ts.png", "snow");
+    assert_eq!(tile_atlas(3, "texpack.png"), "tex/td.png", "desert");
+    assert_eq!(tile_atlas(4, "texpack.png"), "tex/tf.png", "autumn");
+    // Only the shared atlas is swapped; a tile's own texture is left alone.
+    assert_eq!(tile_atlas(4, "t.png"), "tex/t.png");
+    // And every atlas it can name is in the pack.
+    let resources = pack::load(&assets());
+    for theme in 0..=4 {
+        let path = tile_atlas(theme, "texpack.png");
+        assert!(resources.contains_key(&path), "{path} is missing");
+    }
+}
