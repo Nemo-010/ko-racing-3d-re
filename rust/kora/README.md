@@ -230,7 +230,6 @@ macroquad context.
 | `the_pictures_the_front_end_needs_decode` | the maps, both planet plates and the five sky strips all decode |
 | `the_tile_atlas_follows_the_weather` | the atlas is swapped for snow, desert and autumn, and every atlas it names is in the pack |
 | `the_game_z_axis_points_down` | the models' Z runs downwards: road tiles keep their kerbs above the road and every car stands on its wheels |
-| `every_career_race_has_a_marker_on_the_map`, `the_career_map_walks_west_to_east_and_back` | the career map's markers, and the arrows that walk them |
 
 ## No paywall, no server
 
