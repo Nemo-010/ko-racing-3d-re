@@ -389,6 +389,9 @@ impl Running {
             WHITE,
             DrawTextureParams {
                 dest_size: Some(vec2(screen_width(), screen_height())),
+                // macroquad's render targets come out upside down when drawn
+                // back: the framebuffer's origin is the bottom left.
+                flip_y: true,
                 ..Default::default()
             },
         );
