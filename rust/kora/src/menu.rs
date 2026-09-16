@@ -8,18 +8,20 @@
 
 use macroquad::prelude::*;
 
-use crate::campaign::{mode_name, RaceEvent};
-use crate::progress::{medal_name, CarInfo, Progress, MAX_STAT, STAT_NAMES};
+use crate::campaign::RaceEvent;
+use crate::labels;
+use crate::progress::{CarInfo, Progress, MAX_STAT};
 use crate::text;
 
 /// The main menu, shared with `main` so the cursor and the labels agree.
+/// These are label keys rather than text.
 pub const MAIN_ITEMS: [&str; 6] = [
-    "CAREER",
-    "DELUXE",
-    "QUICK RACE",
-    "SELECT CAR",
-    "GARAGE",
-    "QUIT",
+    "menu_career",
+    "menu_deluxe",
+    "menu_quick",
+    "menu_cars",
+    "menu_garage",
+    "menu_quit",
 ];
 
 pub const BACKDROP: Color = Color::new(0.05, 0.07, 0.12, 1.0);
@@ -30,6 +32,10 @@ const ACCENT: Color = Color::new(1.0, 0.85, 0.2, 1.0);
 const GOLD: Color = Color::new(1.0, 0.82, 0.25, 1.0);
 const SILVER: Color = Color::new(0.80, 0.82, 0.86, 1.0);
 const BRONZE: Color = Color::new(0.80, 0.55, 0.30, 1.0);
+
+fn medal_text(medal: u8) -> &'static str {
+    labels::get(labels::medal_key(medal))
+}
 
 fn medal_color(medal: u8) -> Color {
     match medal {
@@ -52,10 +58,10 @@ fn centred(label: &str, y: f32, size: f32, color: Color) {
 }
 
 pub fn draw_main(progress: &Progress, cursor: usize) {
-    centred("K.O. RACING 3D", screen_height() * 0.16, 54.0, WHITE);
-    centred("RUST PORT", screen_height() * 0.16 + 62.0, 22.0, ACCENT);
+    centred(labels::get("kora"), screen_height() * 0.16, 54.0, WHITE);
+    centred(labels::get("port"), screen_height() * 0.16 + 62.0, 22.0, ACCENT);
     centred(
-        &format!("CAREER POINTS {}", progress.points),
+        &labels::format("career_points", &[&progress.points.to_string()]),
         screen_height() * 0.16 + 92.0,
         19.0,
         LOCKED,
@@ -72,14 +78,9 @@ pub fn draw_main(progress: &Progress, cursor: usize) {
         if index == cursor {
             draw_rectangle(left - 6.0, y - 4.0, width + 12.0, row - 4.0, HIGHLIGHT);
         }
-        text::draw_shadow(item, left + 16.0, y, 24.0, WHITE);
+        text::draw_shadow(labels::get(item), left + 16.0, y, 24.0, WHITE);
     }
-    centred(
-        "ARROWS SELECT   ENTER CONFIRM   ESC BACK",
-        screen_height() - 22.0,
-        17.0,
-        LOCKED,
-    );
+    centred(labels::get("keys_menu"), screen_height() - 22.0, 17.0, LOCKED);
 }
 
 /// A scrolling list of races, showing the medal already won and greying out
@@ -101,33 +102,42 @@ pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, tit
         let color = if open { WHITE } else { LOCKED };
         text::draw_shadow(&event.name, 32.0, y, 20.0, color);
         text::draw_shadow(&event.map, 260.0, y, 20.0, color);
-        text::draw_shadow(mode_name(event.mode), 370.0, y, 20.0, LOCKED);
+        text::draw_shadow(labels::mode_name(event.mode), 370.0, y, 20.0, LOCKED);
         text::draw_shadow(&event.laps.to_string(), 500.0, y, 20.0, color);
         text::draw_shadow(&event.opponents.to_string(), 545.0, y, 20.0, color);
         if open {
             let medal = progress.best(&event.key);
-            text::draw_shadow(medal_name(medal), 590.0, y, 20.0, medal_color(medal));
+            text::draw_shadow(medal_text(medal), 590.0, y, 20.0, medal_color(medal));
         } else {
-            text::draw_shadow(&format!("NEED {}", event.threshold), 590.0, y, 20.0, LOCKED);
+            text::draw_shadow(
+                &labels::format("need_points", &[&event.threshold.to_string()]),
+                590.0,
+                y,
+                20.0,
+                LOCKED,
+            );
         }
     }
 
-    text::draw_shadow("MODE", 370.0, top - 22.0, 17.0, LOCKED);
-    text::draw_shadow("LAPS", 500.0, top - 22.0, 17.0, LOCKED);
-    text::draw_shadow("CPU", 545.0, top - 22.0, 17.0, LOCKED);
-    text::draw_shadow("MEDAL", 590.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow(labels::get("col_mode"), 370.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow(labels::get("col_laps"), 500.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow(labels::get("col_cpu"), 545.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow(labels::get("col_medal"), 590.0, top - 22.0, 17.0, LOCKED);
     text::draw_shadow(
-        &format!(
-            "{} of {} events   {} points",
-            cursor.min(events.len().saturating_sub(1)) + 1,
-            events.len(),
-            progress.points
+        &labels::format(
+            "events_count",
+            &[
+                &(cursor.min(events.len().saturating_sub(1)) + 1).to_string(),
+                &events.len().to_string(),
+                &progress.points.to_string(),
+            ],
         ),
         32.0,
-        screen_height() - 22.0,
+        screen_height() - 42.0,
         17.0,
         LOCKED,
     );
+    text::draw_shadow(labels::get("keys_events"), 32.0, screen_height() - 20.0, 15.0, LOCKED);
 }
 
 /// The four stat bars `ba.a(car, stat)` feeds the garage display.
@@ -144,9 +154,14 @@ pub fn draw_cars(
     message: &str,
 ) {
     let garage = focus.is_some();
-    centred(if garage { "GARAGE" } else { "SELECT CAR" }, 12.0, 32.0, WHITE);
     centred(
-        &format!("CAREER POINTS {}", progress.points),
+        labels::get(if garage { "menu_garage" } else { "menu_cars" }),
+        12.0,
+        32.0,
+        WHITE,
+    );
+    centred(
+        &labels::format("career_points", &[&progress.points.to_string()]),
         46.0,
         17.0,
         ACCENT,
@@ -168,7 +183,7 @@ pub fn draw_cars(
             if active { ACCENT } else { WHITE },
         );
         if active {
-            text::draw_shadow("IN USE", 250.0, y + 4.0, 14.0, ACCENT);
+            text::draw_shadow(labels::get("in_use"), 250.0, y + 4.0, 14.0, ACCENT);
         }
 
         let stats = progress.stats(&car.file, car.stats);
@@ -176,7 +191,7 @@ pub fn draw_cars(
             let by = y + 22.0 + stat as f32 * 9.0;
             let selected = garage && index == cursor && focus == Some(stat);
             text::draw_shadow(
-                STAT_NAMES[stat],
+                labels::stat_name(stat),
                 330.0,
                 by,
                 if selected { 14.0 } else { 12.0 },
@@ -199,14 +214,17 @@ pub fn draw_cars(
         if garage && index == cursor {
             match progress.next_upgrade_cost(&car.file, car.stats, focus.unwrap()) {
                 Some(cost) => text::draw_shadow(
-                    &format!("ENTER: {} UPGRADE FOR {}", STAT_NAMES[focus.unwrap()], cost),
+                    &labels::format(
+                        "garage_buy",
+                        &[labels::stat_name(focus.unwrap()), &cost.to_string()],
+                    ),
                     32.0,
                     y + row - 16.0,
                     15.0,
                     if cost <= progress.points { ACCENT } else { LOCKED },
                 ),
                 None => text::draw_shadow(
-                    &format!("{} IS AT MAXIMUM", STAT_NAMES[focus.unwrap()]),
+                    &labels::format("garage_max", &[labels::stat_name(focus.unwrap())]),
                     32.0,
                     y + row - 16.0,
                     15.0,
@@ -220,11 +238,7 @@ pub fn draw_cars(
         text::draw_shadow(message, 32.0, screen_height() - 46.0, 17.0, WHITE);
     }
     text::draw_shadow(
-        if garage {
-            "UP/DOWN CAR   LEFT/RIGHT STAT   ENTER BUY   ESC BACK"
-        } else {
-            "ARROWS SELECT   ENTER CHOOSE   ESC BACK"
-        },
+        labels::get(if garage { "keys_garage" } else { "keys_cars" }),
         32.0,
         screen_height() - 22.0,
         15.0,
@@ -233,18 +247,18 @@ pub fn draw_cars(
 }
 
 pub fn draw_pause(cursor: usize) {
-    let items = ["RESUME", "RESTART", "QUIT TO MENU"];
+    let items = ["pause_resume", "pause_restart", "pause_quit"];
     let width = 260.0;
     let left = (screen_width() - width) / 2.0;
     let top = screen_height() * 0.4;
     panel(Rect::new(left - 12.0, top - 30.0, width + 24.0, items.len() as f32 * 34.0 + 56.0));
-    centred("PAUSED", top - 44.0, 32.0, WHITE);
+    centred(labels::get("pause_title"), top - 44.0, 32.0, WHITE);
     for (index, item) in items.iter().enumerate() {
         let y = top + index as f32 * 34.0;
         if index == cursor {
             draw_rectangle(left - 6.0, y - 4.0, width + 12.0, 30.0, HIGHLIGHT);
         }
-        text::draw_shadow(item, left + 16.0, y, 24.0, WHITE);
+        text::draw_shadow(labels::get(item), left + 16.0, y, 24.0, WHITE);
     }
 }
 
@@ -271,16 +285,29 @@ pub fn draw_results(event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
         text::draw_shadow(label, left + 20.0, y, 21.0, LOCKED);
         text::draw_shadow(value, left + width - 20.0 - text::width(value, 21.0), y, 21.0, color);
     };
-    line(0, "MODE", mode_name(event.mode), LOCKED);
-    line(1, "POSITION", &format!("{} of {}", outcome.place + 1, outcome.cars),
+    line(0, labels::get("col_mode"), labels::mode_name(event.mode), LOCKED);
+    line(1, labels::get("results_position"), &format!("{} of {}", outcome.place + 1, outcome.cars),
          if outcome.place == 0 { GOLD } else { WHITE });
-    line(2, "LAPS", &format!("{}", outcome.laps), WHITE);
-    line(3, "TOTAL", &format_time(outcome.total_time), WHITE);
-    line(4, "BEST LAP", &outcome.best_lap.map(format_time).unwrap_or_else(|| "--:--".into()), ACCENT);
-    line(5, "MEDAL", medal_name(outcome.medal), medal_color(outcome.medal));
-    line(6, "POINTS", &format!("+{}  (total {})", outcome.gained, progress.points), ACCENT);
+    line(2, labels::get("results_laps"), &outcome.laps.to_string(), WHITE);
+    line(3, labels::get("results_total"), &format_time(outcome.total_time), WHITE);
+    line(
+        4,
+        labels::get("results_best"),
+        &outcome
+            .best_lap
+            .map(format_time)
+            .unwrap_or_else(|| labels::get("no_time").to_string()),
+        ACCENT,
+    );
+    line(5, labels::get("results_medal"), medal_text(outcome.medal), medal_color(outcome.medal));
+    line(
+        6,
+        labels::get("points"),
+        &labels::format("results_points", &[&outcome.gained.to_string(), &progress.points.to_string()]),
+        ACCENT,
+    );
 
-    centred("ENTER CONTINUE", top + 250.0, 20.0, LOCKED);
+    centred(labels::get("results_continue"), top + 250.0, 20.0, LOCKED);
 }
 
 pub fn format_time(seconds: f32) -> String {

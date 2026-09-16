@@ -1,0 +1,73 @@
+# K.O. Racing 3D - user interface text used by the Rust port.
+#
+# Three tab separated columns: key, text, source.
+#
+#   key     what the code asks for
+#   text    what is drawn; {} is a placeholder, filled in order by labels::format
+#   source  where the string comes from.  A number is the id the game itself
+#           uses in its own /ui/ui.txt (aq.a(id) hands it to the font), and "-"
+#           marks a string the original has no id for: the port added it for
+#           the screens and features it has that the original does not.
+#
+# Keeping the text here rather than in Rust means the labels can be diffed
+# against the game's file, corrected and translated without touching code.
+kora	K.O. RACING 3D	-
+port	RUST PORT	-
+career_points	CAREER POINTS {}	-
+menu_career	CAREER	54
+menu_deluxe	DELUXE	-
+menu_quick	QUICK RACE	-
+menu_cars	SELECT YOUR CAR	125
+menu_garage	GARAGE	-
+menu_quit	QUIT	3
+keys_menu	ARROWS SELECT   ENTER CONFIRM   ESC BACK	-
+keys_events	ARROWS SELECT   ENTER START   ESC BACK	-
+keys_cars	ARROWS SELECT   ENTER CHOOSE   ESC BACK	-
+keys_garage	UP/DOWN CAR   LEFT/RIGHT STAT   ENTER BUY   ESC BACK	-
+keys_race	ARROWS DRIVE   SPACE BRAKE   ESC PAUSE	-
+events_count	{} of {} events   {} points	-
+col_mode	MODE	-
+col_laps	LAPS	57
+col_cpu	CPU	60
+col_medal	MEDAL	-
+need_points	NEED {}	-
+stat_speed	SPEED	127
+stat_acceleration	ACCELERATION	128
+stat_braking	BRAKING	129
+stat_handling	HANDLING	130
+in_use	IN USE	-
+garage_buy	ENTER: {} UPGRADE FOR {}	-
+garage_max	{} IS AT MAXIMUM	-
+garage_poor	NEED {} POINTS FOR THAT UPGRADE	-
+garage_upgraded	{} {} UPGRADED FOR {} POINTS	-
+car_selected	{} SELECTED	-
+pause_title	PAUSED	-
+pause_resume	RESUME	1
+pause_restart	RESTART	48
+pause_quit	QUIT TO MENU	159
+mode_circuit	CIRCUIT	202
+mode_race	RACE	203
+mode_time_chase	TIME CHASE	204
+mode_survival	SURVIVAL	205
+mode_head_to_head	HEAD TO HEAD	206
+mode_slideshow	SLIDESHOW	207
+mode_special	SPECIAL	208
+results_position	POSITION	164
+results_laps	LAPS	57
+results_total	TOTAL	-
+results_best	BEST LAP	72
+results_medal	MEDAL	-
+points	POINTS	178
+results_points	+{}  (total {})	-
+results_continue	CONTINUE	63
+medal_gold	GOLD	-
+medal_silver	SILVER	-
+medal_bronze	BRONZE	-
+medal_none	-	-
+hud_lap	LAP {}/{}	162
+hud_pos	POS {}/{}	164
+hud_time	TIME {}	-
+hud_lap_best	LAP {}  BEST {}	-
+no_time	--:--	-
+race_needs	{} NEEDS {} POINTS	-
+load_failed	COULD NOT LOAD {}	-

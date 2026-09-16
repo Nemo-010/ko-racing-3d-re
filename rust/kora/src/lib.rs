@@ -11,6 +11,7 @@ pub mod ai;
 pub mod campaign;
 pub mod format;
 pub mod grid;
+pub mod labels;
 pub mod menu;
 pub mod pack;
 pub mod physics;

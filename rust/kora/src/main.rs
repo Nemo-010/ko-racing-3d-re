@@ -17,6 +17,7 @@ use macroquad::prelude::*;
 
 use kora::ai::AiDriver;
 use kora::campaign::{self, RaceEvent};
+use kora::labels;
 use kora::menu::{self, Outcome};
 use kora::physics::{CarControl, Tuning, World};
 use kora::progress::{self, Progress};
@@ -299,21 +300,27 @@ impl Running {
         let place = self.place_of(self.player) + 1;
         text::draw_shadow(&self.event.name, 16.0, 14.0, 28.0, WHITE);
         text::draw_shadow(
-            &format!("LAP {}/{}", (race.lap + 1).min(laps), laps),
+            &labels::format(
+                "hud_lap",
+                &[&(race.lap + 1).min(laps).to_string(), &laps.to_string()],
+            ),
             16.0,
             50.0,
             28.0,
             WHITE,
         );
         text::draw_shadow(
-            &format!("POS {}/{}", place, self.world.cars.len()),
+            &labels::format(
+                "hud_pos",
+                &[&place.to_string(), &self.world.cars.len().to_string()],
+            ),
             16.0,
             86.0,
             28.0,
             WHITE,
         );
         text::draw_shadow(
-            &format!("TIME {}", menu::format_time(race.total_time(now))),
+            &labels::format("hud_time", &[&menu::format_time(race.total_time(now))]),
             16.0,
             122.0,
             28.0,
@@ -322,16 +329,19 @@ impl Running {
         let best = race
             .best
             .map(menu::format_time)
-            .unwrap_or_else(|| "--:--".to_string());
+            .unwrap_or_else(|| labels::get("no_time").to_string());
         text::draw_shadow(
-            &format!("LAP {}  BEST {}", menu::format_time(race.lap_time(now)), best),
+            &labels::format(
+                "hud_lap_best",
+                &[&menu::format_time(race.lap_time(now)), &best],
+            ),
             16.0,
             158.0,
             28.0,
             Color::new(1.0, 0.85, 0.2, 1.0),
         );
         text::draw_shadow(
-            "ARROWS DRIVE   SPACE BRAKE   ESC PAUSE",
+            labels::get("keys_race"),
             16.0,
             screen_height() - 40.0,
             20.0,
@@ -479,7 +489,10 @@ async fn main() {
                     if is_key_pressed(KeyCode::Enter) {
                         let event = events[cursor].clone();
                         if !progress.open(event.threshold) {
-                            message = format!("{} needs {} points", event.name, event.threshold);
+                            message = labels::format(
+                                "race_needs",
+                                &[&event.name.to_uppercase(), &event.threshold.to_string()],
+                            );
                         } else {
                             let file = cars
                                 .get(progress.car)
@@ -490,7 +503,7 @@ async fn main() {
                             if running.is_some() {
                                 screen = Screen::Race;
                             } else {
-                                message = format!("could not load {}", event.map);
+                                message = labels::format("load_failed", &[&event.map.to_uppercase()]);
                             }
                         }
                     }
@@ -516,7 +529,7 @@ async fn main() {
                     if is_key_pressed(KeyCode::Enter) {
                         progress.car = cursor;
                         progress.save(&save_path);
-                        message = format!("{} selected", cars[cursor].name);
+                        message = labels::format("car_selected", &[&cars[cursor].name]);
                         cursor = 0;
                         screen = Screen::Main;
                     }
@@ -555,21 +568,25 @@ async fn main() {
                         match progress.buy_upgrade(&file, base, stat) {
                             Some(cost) => {
                                 progress.save(&save_path);
-                                message = format!(
-                                    "{} {} UPGRADED FOR {} POINTS",
-                                    name,
-                                    progress::STAT_NAMES[stat].to_lowercase(),
-                                    cost
+                                message = labels::format(
+                                    "garage_upgraded",
+                                    &[
+                                        &name,
+                                        &labels::stat_name(stat).to_lowercase(),
+                                        &cost.to_string(),
+                                    ],
                                 );
                             }
                             None => {
-                                message = if progress.next_upgrade_cost(&file, base, stat).is_none() {
-                                    format!("{} IS AT MAXIMUM", progress::STAT_NAMES[stat])
-                                } else {
-                                    format!(
-                                        "NEED {} POINTS FOR THAT UPGRADE",
-                                        progress.next_upgrade_cost(&file, base, stat).unwrap_or(0)
-                                    )
+                                message = match progress.next_upgrade_cost(&file, base, stat) {
+                                    None => labels::format(
+                                        "garage_max",
+                                        &[labels::stat_name(stat)],
+                                    ),
+                                    Some(cost) => labels::format(
+                                        "garage_poor",
+                                        &[&cost.to_string()],
+                                    ),
                                 };
                             }
                         }

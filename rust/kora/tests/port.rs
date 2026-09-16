@@ -1025,10 +1025,13 @@ fn the_deluxe_campaign_opens_on_points_alone() {
 /// relabel the garage.
 #[test]
 fn car_stats_change_the_handling() {
+    use kora::labels;
     use kora::physics::Tuning;
-    use kora::progress::STAT_NAMES;
 
-    assert_eq!(STAT_NAMES, ["SPEED", "ACCELERATION", "BRAKING", "HANDLING"]);
+    assert_eq!(
+        labels::STAT_KEYS.map(labels::get),
+        ["SPEED", "ACCELERATION", "BRAKING", "HANDLING"]
+    );
 
     let base = [3, 5, 5, 1];
     let stock = Tuning::from_stats(base);
@@ -1079,11 +1082,11 @@ fn car_stats_change_the_handling() {
 /// clock rather than a starting grid are the non-circuit ones.
 #[test]
 fn race_modes_are_named_by_the_game() {
-    use kora::campaign::{mode_name, MODE_NAMES};
     use kora::format::RaceConfig;
+    use kora::labels;
 
     assert_eq!(
-        MODE_NAMES,
+        labels::MODE_KEYS.map(labels::get),
         [
             "CIRCUIT",
             "RACE",
@@ -1094,11 +1097,11 @@ fn race_modes_are_named_by_the_game() {
             "SPECIAL"
         ]
     );
-    for (mode, name) in MODE_NAMES.iter().enumerate() {
-        assert_eq!(mode_name(mode as u8), *name);
+    for (mode, key) in labels::MODE_KEYS.iter().enumerate() {
+        assert_eq!(labels::mode_name(mode as u8), labels::get(key));
     }
     // Out of range falls back rather than panicking.
-    assert_eq!(mode_name(200), "SPECIAL");
+    assert_eq!(labels::mode_name(200), "SPECIAL");
 
     // A time trial is exactly a mode that stores a clock, and those are TIME
     // CHASE, SLIDESHOW and SPECIAL.
@@ -1108,10 +1111,13 @@ fn race_modes_are_named_by_the_game() {
             !RaceConfig::RACE_MODES.contains(&mode),
             is_trial,
             "mode {mode} ({}) disagrees about being a time trial",
-            mode_name(mode)
+            labels::mode_name(mode)
         );
         if is_trial {
-            assert!(matches!(mode_name(mode), "TIME CHASE" | "SLIDESHOW" | "SPECIAL"));
+            assert!(matches!(
+                labels::mode_name(mode),
+                "TIME CHASE" | "SLIDESHOW" | "SPECIAL"
+            ));
         }
     }
 }
@@ -1155,4 +1161,105 @@ fn upgrades_make_a_car_quicker() {
         maxed > stock,
         "a maxed car should be quicker: {maxed:.2} against {stock:.2}"
     );
+}
+
+/// The label table is data, so it can be checked as data: every line parses,
+/// keys are unique, every key the code asks for resolves, and the source
+/// column only ever holds one of the game's ids or a dash.
+#[test]
+fn the_label_table_is_well_formed() {
+    use kora::labels;
+    use std::collections::HashSet;
+
+    let source = include_str!("../labels.tsv");
+    let mut keys = HashSet::new();
+    let mut from_the_game = 0;
+    for (number, line) in source.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let columns: Vec<&str> = line.split('\t').collect();
+        assert_eq!(columns.len(), 3, "line {}: expected three columns", number + 1);
+        let (key, text, origin) = (columns[0], columns[1], columns[2]);
+        assert!(!key.is_empty(), "line {}: empty key", number + 1);
+        assert!(!text.is_empty(), "line {}: empty text for {key}", number + 1);
+        assert!(
+            origin == "-" || origin.parse::<u16>().is_ok(),
+            "line {}: source {origin:?} is neither a dash nor an id",
+            number + 1
+        );
+        if origin != "-" {
+            from_the_game += 1;
+        }
+        assert!(keys.insert(key), "line {}: {key} appears twice", number + 1);
+    }
+    assert!(keys.len() > 40, "the table looks short: {}", keys.len());
+    assert!(
+        from_the_game >= 20,
+        "only {from_the_game} labels are the game's own; the rest are guesses"
+    );
+
+    // A key that is in the file must resolve to something other than itself,
+    // which is how a missing entry falls back.
+    for key in &keys {
+        assert_ne!(labels::get(key), *key, "{key} did not resolve");
+    }
+
+    // And every key the code asks for has to be in the file.  `get` returns
+    // the key on a miss, so a typo would otherwise reach the screen.
+    let required = [
+        labels::STAT_KEYS.as_slice(),
+        labels::MODE_KEYS.as_slice(),
+        &[
+            "kora",
+            "port",
+            "career_points",
+            "events_count",
+            "need_points",
+            "in_use",
+            "garage_buy",
+            "garage_max",
+            "garage_poor",
+            "garage_upgraded",
+            "car_selected",
+            "pause_title",
+            "pause_resume",
+            "pause_restart",
+            "pause_quit",
+            "col_mode",
+            "col_laps",
+            "col_cpu",
+            "col_medal",
+            "results_position",
+            "results_laps",
+            "results_total",
+            "results_best",
+            "results_medal",
+            "results_points",
+            "results_continue",
+            "hud_lap",
+            "hud_pos",
+            "hud_time",
+            "hud_lap_best",
+            "no_time",
+            "race_needs",
+            "load_failed",
+            "keys_menu",
+            "keys_events",
+            "keys_cars",
+            "keys_garage",
+            "keys_race",
+            "points",
+        ],
+    ];
+    for (index, group) in required.iter().enumerate() {
+        for key in *group {
+            assert!(keys.contains(key), "group {index}: {key} is missing from the table");
+        }
+    }
+
+    // Placeholders: `format` fills them in order and leaves nothing behind.
+    assert_eq!(labels::format("hud_lap", &["1", "3"]), "LAP 1/3");
+    assert_eq!(labels::format("hud_pos", &["2", "4"]), "POS 2/4");
+    assert_eq!(labels::format("results_points", &["3", "12"]), "+3  (total 12)");
 }

@@ -92,8 +92,10 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
 
 ```
 fonts/           Contrail One + its OFL licence (bundled via include_bytes)
+labels.tsv       every string the interface draws, with its provenance
 src/pack.rs      resource archive reader
 src/progress.rs  medals, points, car list and the save file
+src/labels.rs    UI text, loaded from labels.tsv
 src/menu.rs      every screen outside the race
 src/format.rs    per-format parsers
 src/grid.rs      road graph, race direction, starting grid
@@ -141,6 +143,7 @@ macroquad context.
 | `car_stats_change_the_handling` | each of the four values moves its own part of the tuning |
 | `upgrades_make_a_car_quicker` | a maxed car reaches a higher speed than a stock one |
 | `race_modes_are_named_by_the_game` | the seven mode names, and that the clock-carrying modes are the non-circuit ones |
+| `the_label_table_is_well_formed` | the TSV parses, keys are unique, every key the code uses resolves, placeholders fill |
 
 ## No paywall, no server
 
@@ -165,6 +168,34 @@ them are never read by this build.  So the mapping from those four values to
 engine, damping, steering, friction and brakes is the port's, chosen so the
 first car in `ba.a`'s list lands on the constants the port was calibrated with;
 `physics::Tuning` documents it.
+
+## Labels
+
+Every string the interface draws lives in `labels.tsv`, not in the code:
+
+```
+key	text	source
+hud_lap	LAP {}/{}	162
+stat_speed	SPEED	127
+mode_time_chase	TIME CHASE	204
+menu_garage	GARAGE	-
+```
+
+`key` is what the code asks for, `text` is what is drawn, and `source` records
+where the string came from: a number is the id the game itself uses in its own
+`/ui/ui.txt`, and `-` marks a string the original has no id for, added for the
+screens and features the port has and the original does not.  25 of the 60 are
+the game's own.  `{}` is a placeholder, filled in order by `labels::format`.
+
+The table is embedded with `include_str!`, so the binary stays self-contained,
+and `src/labels.rs` is a thin lookup over it: `get`, `format`, plus the stat and
+mode names the rest of the code asks for by index.  An unknown key returns the
+key itself rather than panicking from inside a frame, and a test walks the file,
+checks the keys are unique, the source column parsed, and that every key the
+code asks for is present.
+
+Keeping the text here rather than in Rust means a label can be corrected or
+translated, and diffed against the game's own file, without touching code.
 
 ## Text
 
