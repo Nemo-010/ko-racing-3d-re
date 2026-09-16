@@ -208,9 +208,9 @@ repeat level_count:
     i16 x, i16 y                # preview / editor position
     str name                    # e.g. "TIMBERTON"
     str map                     # e.g. "ma1.map"
-    i8  a
-    i8  b
-    i8  flag                    # 0 locked, 1 unlocked
+    u8  modes                   # bitmask of the game modes offered here
+    u8  flags
+    u8  unlocked                # 0 locked, 1 unlocked
 
 u8    unlock_read               # the reader allocates unlock_read + 1 slots
 repeat unlock_read: i32 value   # medal / star thresholds

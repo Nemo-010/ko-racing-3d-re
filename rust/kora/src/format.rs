@@ -35,6 +35,17 @@ impl<'a> Reader<'a> {
         value
     }
 
+    pub fn i32(&mut self) -> i32 {
+        let value = i32::from_be_bytes([
+            self.data[self.pos],
+            self.data[self.pos + 1],
+            self.data[self.pos + 2],
+            self.data[self.pos + 3],
+        ]);
+        self.pos += 4;
+        value
+    }
+
     pub fn u32(&mut self) -> u32 {
         let value = u32::from_be_bytes([
             self.data[self.pos],
@@ -386,6 +397,200 @@ impl HighDetail {
             });
         }
         Some(HighDetail { entries })
+    }
+}
+
+/// One level of the career table (`.000`).
+pub struct CampaignLevel {
+    pub x: i16,
+    pub y: i16,
+    pub name: String,
+    pub map: String,
+    /// Bitmask of the game modes offered for this level.
+    pub modes: u8,
+    pub flags: u8,
+    pub unlocked: u8,
+}
+
+/// One race entry of the career table: a mode plus the offset of its setup
+/// inside the matching `.001`.
+pub struct RaceRecord {
+    pub mode: u8,
+    pub level: u8,
+    pub values: [i32; 3],
+}
+
+/// `.000` - class `u`.
+///
+/// ```text
+/// u8    level_count
+/// repeat: i16 x, i16 y, str name, str map, u8 modes, u8 flags, u8 unlocked
+/// u8    unlock_count_minus_one ; unlock_count = read + 1
+/// repeat (unlock_count - 1): i32
+/// u8    download_count
+/// repeat: i32, str
+/// u8    record_count
+/// repeat: u8 mode, u8 level, i32, i32, i32
+/// ```
+pub struct Campaign {
+    pub levels: Vec<CampaignLevel>,
+    pub unlock: Vec<i32>,
+    pub downloads: Vec<(i32, String)>,
+    pub records: Vec<RaceRecord>,
+}
+
+impl Campaign {
+    pub fn parse(data: &[u8]) -> Option<Campaign> {
+        let mut r = Reader::new(data);
+        let count = r.u8() as usize;
+        let mut levels = Vec::with_capacity(count);
+        for _ in 0..count {
+            levels.push(CampaignLevel {
+                x: r.u16() as i16,
+                y: r.u16() as i16,
+                name: r.string(),
+                map: r.string(),
+                modes: r.u8(),
+                flags: r.u8(),
+                unlocked: r.u8(),
+            });
+        }
+        let unlock_count = r.u8() as usize + 1;
+        let unlock = (0..unlock_count.saturating_sub(1)).map(|_| r.i32()).collect();
+        let download_count = r.u8() as usize;
+        let downloads = (0..download_count).map(|_| (r.i32(), r.string())).collect();
+        let record_count = r.u8() as usize;
+        let records = (0..record_count)
+            .map(|_| RaceRecord {
+                mode: r.u8(),
+                level: r.u8(),
+                values: [r.i32(), r.i32(), r.i32()],
+            })
+            .collect();
+        Some(Campaign {
+            levels,
+            unlock,
+            downloads,
+            records,
+        })
+    }
+}
+
+/// A per-race setup read from `<campaign>.001` at a record's offset.
+///
+/// Every game mode stores its setup with its own layout, taken from the
+/// reader the MIDlet uses for that mode:
+///
+/// ```text
+/// mode 0 / 4  (cu.b)  u8 laps, u8 theme, u8 flag, u8 car, u8 param, u8 opponents
+/// mode 1      (r.b)   u8 theme, u8 flag, u8 car, u8 param, u8 opponents  (one lap)
+/// mode 2 / 6  (dk.b)  u8 theme, u8 flag, u8 laps, u8 car, i32 time_limit
+/// mode 3      (cd.b)  u8 theme, u8 flag, u8 car, u8 param, u8 opponents  (laps := opponents)
+/// mode 5      (bv.b)  u8 theme, u8 flag, u8 laps, u8 car, i32 time_limit
+/// ```
+///
+/// `theme` picks the tile/texture variant (`bm` and `bp` compare it with 3,
+/// and `dk` forces it to 3 for `8a.map`).  `car` is the player's car index,
+/// except that values >= 50 mark the deluxe time-attack entries, where the
+/// trailing `i32` is the time limit instead.
+pub struct RaceConfig {
+    pub mode: u8,
+    pub laps: u32,
+    pub theme: u8,
+    pub flag: bool,
+    pub car: u8,
+    pub opponents: u32,
+    pub param: Option<u8>,
+    pub time_limit: Option<i32>,
+}
+
+impl RaceConfig {
+    /// Modes that are a race against opponents rather than a solo time trial.
+    pub const RACE_MODES: [u8; 4] = [0, 1, 3, 4];
+
+    pub fn is_race(&self) -> bool {
+        Self::RACE_MODES.contains(&self.mode)
+    }
+
+    pub fn parse(data: &[u8], offset: usize, mode: u8) -> Option<RaceConfig> {
+        let mut r = Reader::new(data);
+        r.pos = offset;
+        if offset >= data.len() {
+            return None;
+        }
+        let config = match mode {
+            0 | 4 => {
+                let laps = r.u8();
+                let theme = r.u8();
+                let flag = r.u8() != 0;
+                let car = r.u8();
+                let param = r.u8();
+                let opponents = r.u8();
+                RaceConfig {
+                    mode,
+                    laps: laps as u32,
+                    theme,
+                    flag,
+                    car,
+                    opponents: opponents as u32,
+                    param: Some(param),
+                    time_limit: None,
+                }
+            }
+            1 => {
+                let theme = r.u8();
+                let flag = r.u8() != 0;
+                let car = r.u8();
+                let param = r.u8();
+                let opponents = r.u8();
+                RaceConfig {
+                    mode,
+                    laps: 1,
+                    theme,
+                    flag,
+                    car,
+                    opponents: opponents as u32,
+                    param: Some(param),
+                    time_limit: None,
+                }
+            }
+            2 | 5 | 6 => {
+                let theme = r.u8();
+                let flag = r.u8() != 0;
+                let laps = r.u8();
+                let car = r.u8();
+                let time_limit = r.i32();
+                RaceConfig {
+                    mode,
+                    laps: laps as u32,
+                    theme,
+                    flag,
+                    car,
+                    opponents: 0,
+                    param: None,
+                    time_limit: Some(time_limit),
+                }
+            }
+            3 => {
+                let theme = r.u8();
+                let flag = r.u8() != 0;
+                let car = r.u8();
+                let param = r.u8();
+                let opponents = r.u8();
+                RaceConfig {
+                    mode,
+                    laps: opponents as u32,
+                    theme,
+                    flag,
+                    car,
+                    opponents: opponents as u32,
+                    param: Some(param),
+                    time_limit: None,
+                }
+            }
+            _ => return None,
+        };
+        Some(config)
     }
 }
 

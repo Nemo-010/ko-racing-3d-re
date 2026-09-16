@@ -58,6 +58,11 @@ class Reader:
         self.pos += 2
         return value
 
+    def i32(self) -> int:
+        value = struct.unpack_from(">i", self.blob, self.pos)[0]
+        self.pos += 4
+        return value
+
     def u32(self) -> int:
         value = struct.unpack_from(">I", self.blob, self.pos)[0]
         self.pos += 4
@@ -402,33 +407,84 @@ class Campaign:
 
 
 # --------------------------------------------------------------------------
-# campaign .001  -  class r / cu / dk (method b())
+# campaign .001  -  class r / cu / dk / cd / bv
 # --------------------------------------------------------------------------
 @dataclass
 class RaceConfig:
-    """One six-byte race setup, read at a per-level skip offset.
+    """One per-race setup, read from ``<campaign>.001`` at a record's offset.
 
-    The opponent car indices are generated at runtime, not stored, so a
-    ``.001`` file is just a sequence of these blocks (padded); use the
-    ``values[2]`` field of a :class:`CampaignTailEntry` as the offset and
-    :meth:`parse_at`.
+    A race record in the ``.000`` table names a game mode and carries the byte
+    offset of its setup inside the matching ``.001``.  Every mode stores that
+    setup with its own layout, so the field order below is taken from the
+    reader the MIDlet uses for that mode::
+
+        mode 0 / 4  (cu.b)  u8 laps, u8 theme, u8 flag, u8 car, u8 param, u8 opponents
+        mode 1      (r.b)   u8 theme, u8 flag, u8 car, u8 param, u8 opponents   (one lap)
+        mode 2 / 6  (dk.b)  u8 theme, u8 flag, u8 laps, u8 car, i32 time_limit
+        mode 3      (cd.b)  u8 theme, u8 flag, u8 car, u8 param, u8 opponents   (laps := opponents)
+        mode 5      (bv.b)  u8 theme, u8 flag, u8 laps, u8 car, i32 time_limit
+
+    ``theme`` selects the tile/texture variant (``bm``/``bp`` compare it with
+    3, and ``dk`` forces it to 3 for ``8a.map``); ``car`` is the player's car
+    index, except that values >= 50 mark the deluxe time-attack entries, where
+    the trailing i32 is the time limit instead.
     """
 
-    k: int
-    j: int
+    mode: int
+    laps: int
+    theme: int
     flag: bool
-    h: int
-    m: int
+    car: int
     opponents: int
+    param: Optional[int] = None
+    time_limit: Optional[int] = None
+
+    #: Modes that are a race against opponents rather than a solo time trial.
+    RACE_MODES = (0, 1, 3, 4)
 
     @classmethod
-    def parse_at(cls, blob: bytes, offset: int) -> "RaceConfig":
+    def parse(cls, blob: bytes, offset: int, mode: int) -> "RaceConfig":
         r = Reader(blob)
         r.pos = offset
-        k, j = r.u8(), r.u8()
-        flag = r.u8() != 0
-        h, m, opponents = r.u8(), r.u8(), r.u8()
-        return cls(k, j, flag, h, m, opponents)
+        if mode in (0, 4):
+            laps, theme, flag = r.u8(), r.u8(), r.u8() != 0
+            car, param, opponents = r.u8(), r.u8(), r.u8()
+            return cls(mode, laps, theme, flag, car, opponents, param)
+        if mode == 1:
+            theme, flag = r.u8(), r.u8() != 0
+            car, param, opponents = r.u8(), r.u8(), r.u8()
+            return cls(mode, 1, theme, flag, car, opponents, param)
+        if mode in (2, 5, 6):
+            theme, flag, laps, car = r.u8(), r.u8() != 0, r.u8(), r.u8()
+            return cls(mode, laps, theme, flag, car, 0, None, r.i32())
+        if mode == 3:
+            theme, flag = r.u8(), r.u8() != 0
+            car, param, opponents = r.u8(), r.u8(), r.u8()
+            return cls(mode, opponents, theme, flag, car, opponents, param)
+        raise ValueError("unknown race mode %d" % mode)
+
+
+def race_config_for(resources, map_name: str):
+    """Find the race record that drives *map_name*.
+
+    Returns ``(campaign_name, level_index, RaceConfig)`` for the first
+    campaign level whose map matches, preferring a race mode with opponents.
+    """
+    for base in ("campaign/campaign", "campaign/deluxe"):
+        if base + ".000" not in resources or base + ".001" not in resources:
+            continue
+        campaign = Campaign.parse(resources[base + ".000"])
+        blob = resources[base + ".001"]
+        for index, level in enumerate(campaign.levels):
+            if level.map != map_name:
+                continue
+            records = [e for e in campaign.extras if e.b == index]
+            if not records:
+                continue
+            records.sort(key=lambda e: (e.a not in RaceConfig.RACE_MODES, e.a))
+            entry = records[0]
+            return base, index, RaceConfig.parse(blob, entry.values[2], entry.a)
+    return None
 
 
 # --------------------------------------------------------------------------

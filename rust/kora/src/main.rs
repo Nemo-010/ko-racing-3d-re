@@ -16,6 +16,7 @@ use macroquad::models::{draw_mesh, Mesh};
 use macroquad::prelude::*;
 
 use kora::ai::AiDriver;
+use kora::campaign;
 use kora::physics::{CarControl, World};
 use kora::race::Race;
 use kora::text::GameFont;
@@ -34,12 +35,50 @@ fn assets_dir() -> PathBuf {
     PathBuf::from("assets")
 }
 
-fn env_number(name: &str, default: u32, max: u32) -> u32 {
+/// Environment override, if set to a valid number.
+fn env_number(name: &str, max: u32) -> Option<u32> {
     std::env::var(name)
         .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(default)
-        .min(max)
+        .and_then(|value| value.parse::<u32>().ok())
+        .map(|value| value.min(max))
+}
+
+/// The race setup the port will actually use.
+struct Settings {
+    laps: u32,
+    opponents: u32,
+    theme: u8,
+    source: String,
+}
+
+/// Laps and opponents come from the campaign tables when the track belongs to
+/// one, with `KORA_LAPS` / `KORA_OPPONENTS` overriding.  A campaign record can
+/// be a solo time trial (`dk`/`bv`/`d` store a clock, not opponents); those
+/// keep their lap count but fall back to the default grid.
+fn settings_for(resources: &pack::Resources, map_name: &str) -> Settings {
+    let setup = campaign::race_for(resources, map_name);
+    let (laps, opponents, theme, source) = match &setup {
+        Some(setup) => {
+            let (laps, opponents) = setup.laps_and_opponents();
+            let opponents = if setup.config.is_race() { opponents } else { 3 };
+            (
+                laps,
+                opponents,
+                setup.config.theme,
+                format!(
+                    "{} level {} ({}) mode {}",
+                    setup.table, setup.level_index, setup.level_name, setup.config.mode
+                ),
+            )
+        }
+        None => (3, 3, 0, "no campaign entry, using defaults".to_string()),
+    };
+    Settings {
+        laps: env_number("KORA_LAPS", 99).unwrap_or(laps).max(1),
+        opponents: env_number("KORA_OPPONENTS", 7).unwrap_or(opponents),
+        theme,
+        source,
+    }
 }
 
 fn format_time(seconds: f32) -> String {
@@ -56,9 +95,15 @@ async fn main() {
     println!("  {} resources indexed", resources.len());
 
     let map_name = std::env::var("KORA_MAP").unwrap_or_else(|_| "1.map".to_string());
-    let laps = env_number("KORA_LAPS", 3, 99);
-    let opponents = env_number("KORA_OPPONENTS", 3, 7);
-    let mut track = scene::build(&dir, &resources, &map_name);
+    let settings = settings_for(&resources, &map_name);
+    let Settings {
+        laps,
+        opponents,
+        theme,
+        source,
+    } = settings;
+    println!("race: {source} -> {laps} laps, {opponents} opponents, theme {theme}");
+    let mut track = scene::build_themed(&dir, &resources, &map_name, theme);
     println!(
         "track {}: {} mesh batches, {} collision triangles, {} road cells, {} gates",
         map_name,

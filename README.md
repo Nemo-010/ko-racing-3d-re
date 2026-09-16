@@ -141,9 +141,13 @@ Full byte tables are in [`tools/README.md`](tools/README.md). Summary:
   flagged grid (each set flag bit contributes a 2-byte payload), then start,
   finish and checkpoint coordinates.  All 40 files parse to the exact byte;
   `minimaps/` shows the result.
-* **campaign `.000`** — level list (name, map file, preview coords, medal
-  thresholds, downloadable extras) and **`.001`** — six-byte per-level race
-  config blocks addressed by the offsets in the `.000` table.
+* **campaign `.000`** — level list (name, map file, preview coords, mode
+  bitmask, medal thresholds, downloadable extras) and **`.001`** — a pool of
+  per-race setup blobs addressed by the offsets in the `.000` table.  Each
+  game mode stores its blob with its own layout (five in total), which is
+  what the offsets' uneven spacing reflects; all 47 records in the two
+  campaigns decode to in-range values, giving each track its lap count,
+  theme and opponent grid.
 * **fonts** — a metrics file (`/fonts/<name>`), an RGBA atlas (`<name>.png`)
   and a `.tab` character map; glyph rectangles are derived by wrapping the
   atlas by advance width.  All 6 tables and 18 fonts decode.
@@ -221,10 +225,9 @@ Bluetooth/Vserv/SMS code paths.  See
 
 ## Suggested next steps
 
-1. Pin down the `.001` race-record indexing and drive laps/opponents from the
-   campaign tables instead of environment variables.
-2. Track elevation: build the collider from each tile's collision mesh where
+1. Track elevation: build the collider from each tile's collision mesh where
    one exists, so bridges and jumps stop being flat.
-3. Menus and car selection, then the career loop over `campaign.000`.
+2. Menus and car selection, then the career loop over `campaign.000`:
+   progression, medals and unlock thresholds (all already decoded).
 4. Repack support: the pack format is simple enough to write, enabling
    asset swaps or a JAR rebuild.

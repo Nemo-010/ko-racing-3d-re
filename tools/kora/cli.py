@@ -132,23 +132,59 @@ def cmd_mapimg(args) -> int:
 
 
 def cmd_campaign(args) -> int:
-    campaign = formats.Campaign.parse(open(args.path, "rb").read())
+    import os
+
+    with open(args.path, "rb") as handle:
+        campaign = formats.Campaign.parse(handle.read())
+    # The matching .001 holds the per-race setups, addressed by the third i32
+    # of each record.  Each game mode stores its own layout (see RaceConfig).
+    races = os.path.splitext(args.path)[0] + ".001"
+    blob = None
+    if os.path.exists(races):
+        with open(races, "rb") as handle:
+            blob = handle.read()
+
+    def config_of(entry):
+        if blob is None:
+            return None
+        try:
+            return formats.RaceConfig.parse(blob, entry.values[2], entry.a)
+        except (ValueError, IndexError):
+            return None
+
     if args.tsv:
-        print("#\tname\tmap\tx\ty\ta\tb\tflag\texoffset")
-        offsets = [e.values[2] for e in campaign.extras]
-        for i, level in enumerate(campaign.levels):
-            skip = offsets[i] if i < len(offsets) else -1
-            print("%d\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d"
-                  % (i, level.name, level.map, level.x, level.y,
-                     level.a, level.b, level.flag, skip))
-    else:
-        print("levels:    %d" % len(campaign.levels))
-        print("unlock:    %s" % campaign.unlock)
-        print("downloads: %s" % campaign.downloads)
-        print("extras:    %d" % len(campaign.extras))
-        for i, level in enumerate(campaign.levels):
-            print("  %2d %-16s %-10s (%d,%d)" % (i, level.name, level.map,
-                                                  level.x, level.y))
+        print("campaign\tmode\tlevel\tname\tmap\toffset\tlaps\ttheme\topponents")
+        for entry in campaign.extras:
+            level = campaign.levels[entry.b] if entry.b < len(campaign.levels) else None
+            config = config_of(entry)
+            print("%s\t%d\t%d\t%s\t%s\t%d\t%s\t%s\t%s"
+                  % (os.path.basename(args.path), entry.a, entry.b,
+                     level.name if level else "?", level.map if level else "?",
+                     entry.values[2],
+                     config.laps if config else "?",
+                     config.theme if config else "?",
+                     (config.opponents if entry.a in formats.RaceConfig.RACE_MODES
+                      else "-") if config else "?"))
+        return 0
+
+    print("levels:    %d" % len(campaign.levels))
+    print("unlock:    %s" % campaign.unlock)
+    print("downloads: %s" % campaign.downloads)
+    print("races:     %d" % len(campaign.extras))
+    for i, level in enumerate(campaign.levels):
+        print("  %2d %-16s %-10s (%d,%d)" % (i, level.name, level.map,
+                                              level.x, level.y))
+        for entry in campaign.extras:
+            if entry.b != i:
+                continue
+            config = config_of(entry)
+            if config is None:
+                print("       mode %d  offset %-4d  ?" % (entry.a, entry.values[2]))
+                continue
+            opponents = (str(config.opponents)
+                         if entry.a in formats.RaceConfig.RACE_MODES else "-")
+            print("       mode %d  offset %-4d  laps=%d theme=%d opponents=%s"
+                  % (entry.a, entry.values[2], config.laps, config.theme, opponents))
     return 0
 
 

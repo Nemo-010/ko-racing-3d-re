@@ -159,7 +159,41 @@ fn parse_model(res: &Resources, path: &str) -> Option<format::Model> {
         .and_then(|bytes| format::Model::parse(bytes))
 }
 
+/// Detail remap from `bm.a(ae/ap, kind, arg)`: on theme 3 the MIDlet drops a
+/// range of mid/high-detail indices, and `bp` swaps two object kinds.
+fn themed_detail(theme: u8, kind: u8) -> u8 {
+    if theme == 3
+        && (kind < 19
+            || kind == 22
+            || kind == 28
+            || kind == 29
+            || kind == 30
+            || (32..=36).contains(&kind))
+    {
+        0
+    } else {
+        kind
+    }
+}
+
+fn themed_object(theme: u8, kind: u8) -> u8 {
+    if theme == 3 {
+        match kind {
+            0 | 1 => 5,
+            2 | 3 => 4,
+            other => other,
+        }
+    } else {
+        kind
+    }
+}
+
 pub fn build(dir: &Path, res: &Resources, map_name: &str) -> Track {
+    build_themed(dir, res, map_name, 0)
+}
+
+/// Build a track with a specific tile/texture variant (the campaign's `theme`).
+pub fn build_themed(dir: &Path, res: &Resources, map_name: &str, theme: u8) -> Track {
     let tile_list = pack::lines(&pack::read_jar_file(dir, "lists/tile_list"));
     let md_list = pack::lines(&pack::read_jar_file(dir, "lists/md_list"));
     let hd_list = pack::lines(&pack::read_jar_file(dir, "lists/hd_list"));
@@ -214,6 +248,7 @@ pub fn build(dir: &Path, res: &Resources, map_name: &str) -> Track {
             }
 
             for &(kind, arg) in &cell.mid {
+                let kind = themed_detail(theme, kind);
                 if kind == 0 {
                     continue;
                 }
@@ -239,6 +274,7 @@ pub fn build(dir: &Path, res: &Resources, map_name: &str) -> Track {
             }
 
             for &(kind, arg) in &cell.high {
+                let kind = themed_detail(theme, kind);
                 if kind == 0 {
                     continue;
                 }
@@ -255,20 +291,21 @@ pub fn build(dir: &Path, res: &Resources, map_name: &str) -> Track {
                 let Some(hd) = highs.get(&kind) else { continue };
                 // `bp` places each entry at half-tile offsets, mirrored per side.
                 for entry in &hd.entries {
-                    if entry.kind == 0 {
+                    let object_kind = themed_object(theme, entry.kind);
+                    if object_kind == 0 {
                         continue;
                     }
-                    if !objects.contains_key(&entry.kind) {
-                        if let Some(file) = list_entry(&ob_list, entry.kind) {
+                    if !objects.contains_key(&object_kind) {
+                        if let Some(file) = list_entry(&ob_list, object_kind) {
                             if let Some(ob) = res
                                 .get(&format!("objects/{file}"))
                                 .and_then(|bytes| format::ObjectDef::parse(bytes))
                             {
-                                objects.insert(entry.kind, ob);
+                                objects.insert(object_kind, ob);
                             }
                         }
                     }
-                    let Some(object) = objects.get(&entry.kind) else {
+                    let Some(object) = objects.get(&object_kind) else {
                         continue;
                     };
                     let px = 7.0 * entry.position[0];

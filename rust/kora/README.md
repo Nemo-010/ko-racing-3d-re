@@ -26,8 +26,8 @@ cargo test --release                     # headless checks
 | `KORA_ASSETS` | `assets` | directory holding `data`, `data.*` and `lists/` |
 | `KORA_MAP` | `1.map` | track to load (`levels/*.map`) |
 | `KORA_CAR` | `cars/rally.car` | car descriptor to drive |
-| `KORA_LAPS` | `3` | laps in the race |
-| `KORA_OPPONENTS` | `3` | number of AI cars (0-7) |
+| `KORA_LAPS` | campaign, else `3` | laps in the race |
+| `KORA_OPPONENTS` | campaign, else `3` | number of AI cars (0-7) |
 
 Controls: **arrows** or **WASD** to drive, **space** handbrake, **R** restart,
 **Esc** quit.
@@ -50,6 +50,11 @@ Controls: **arrows** or **WASD** to drive, **space** handbrake, **R** restart,
   is how the flag semantics were confirmed rather than guessed.  The graph
   provides the race direction, a starting grid, and the "next point on the
   road" lookahead the AI steers at.
+* **Career tables** (`campaign`) - `campaign.000` and `deluxe.000` list the
+  levels and races, and each race record points at its setup in the matching
+  `.001`.  Every game mode stores that setup with its own layout, all five of
+  which are decoded, so a track that belongs to a campaign takes its lap count
+  and opponent grid from the game's own data.
 * **Race rules** (`race`) - laps, checkpoints in order, timing, best lap and
   race position.  The opening crossing of the line never scores, and a car
   that starts behind it has that first crossing suppressed.
@@ -68,6 +73,7 @@ Controls: **arrows** or **WASD** to drive, **space** handbrake, **R** restart,
 src/pack.rs      resource archive reader
 src/format.rs    per-format parsers
 src/grid.rs      road graph, race direction, starting grid
+src/campaign.rs  career tables -> laps/opponents/theme for a track
 src/scene.rs     map -> baked meshes + collision + barriers + car geometry
 src/physics.rs   rapier world and cars
 src/ai.rs        opponent driving
@@ -97,6 +103,9 @@ macroquad context.
 | `car_settles_and_drives_on_the_track` | the vehicle rests on the road and moves under throttle |
 | `opponents_drive_the_track` | four AI cars complete laps of 1.map and post sane lap times |
 | `opponents_survive_other_tracks` | AI on a long checkpoint circuit, a big open track and a twisty one |
+| `campaign_tables_decode` | both career tables, every race record, all five mode layouts |
+| `campaign_lookup_picks_the_right_race` | the map -> race lookup, including quick-race maps with no entry |
+| `campaign_themes_still_build` | building a track in theme 3 produces the same collider |
 
 ## Coordinate conventions
 
@@ -141,10 +150,8 @@ as-is.
 ## Not implemented
 
 * menus, car selection and the garage; the `.bck` backgrounds;
-* the campaign (`.000`/`.001`), unlock progression and medals - the tables are
-  decoded in the Python tooling, but the per-level indexing of the `.001`
-  race records is not pinned down, so laps and opponents come from the
-  environment instead;
+* unlock progression, medals and the campaign menus, even though the tables
+  are decoded: the port reads a track's race setup but never saves progress;
 * audio (the referenced `.amr` clips are not shipped in the pack at all) and
   the Bluetooth/Vserv/SMS code paths;
 * track elevation: the collider is flat even where a tile's collision mesh

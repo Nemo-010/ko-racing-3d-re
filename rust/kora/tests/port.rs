@@ -448,3 +448,118 @@ fn opponents_survive_other_tracks() {
         }
     }
 }
+
+/// Both career tables must parse, and every race record must decode to values
+/// the game could actually use.
+#[test]
+fn campaign_tables_decode() {
+    use kora::campaign;
+    use kora::format::RaceConfig;
+    let resources = pack::load(&assets());
+    let tables = campaign::load(&resources);
+    assert_eq!(tables.len(), 2, "expected campaign.000 and deluxe.000");
+
+    let expected = [("campaign/campaign", 18usize, 34usize), ("campaign/deluxe", 13, 13)];
+    for ((base, table), (want_base, levels, records)) in tables.iter().zip(expected) {
+        assert_eq!(base, want_base);
+        assert_eq!(table.levels.len(), levels, "{base}: levels");
+        assert_eq!(table.records.len(), records, "{base}: race records");
+        let blob = &resources[&format!("{base}.001")];
+
+        for record in &table.records {
+            let offset = record.values[2].max(0) as usize;
+            let config = RaceConfig::parse(blob, offset, record.mode)
+                .unwrap_or_else(|| panic!("{base}: mode {} at {offset} did not decode", record.mode));
+            assert!(record.level < table.levels.len() as u8, "{base}: bad level");
+            assert!((1..=9).contains(&config.laps), "{base}: laps {}", config.laps);
+            assert!(config.theme <= 4, "{base}: theme {}", config.theme);
+            if config.is_race() {
+                assert!(
+                    (1..=7).contains(&config.opponents),
+                    "{base}: opponents {} in mode {}",
+                    config.opponents,
+                    config.mode
+                );
+            } else {
+                let limit = config.time_limit.expect("time trial needs a clock");
+                assert!(limit > 0 && limit < 2_000_000, "{base}: clock {limit}");
+            }
+            // The player car is either a real car index or one of the deluxe
+            // time-attack markers (>= 50).
+            assert!(
+                config.car < 8 || config.car >= 50,
+                "{base}: car index {}",
+                config.car
+            );
+        }
+    }
+
+    // The career table's level names and maps should line up with the pack.
+    let (_, career) = &tables[0];
+    for level in &career.levels {
+        assert!(
+            resources.contains_key(&format!("levels/{}", level.map)),
+            "level {} names a missing map {}",
+            level.name,
+            level.map
+        );
+    }
+}
+
+/// The lookup has to agree with the tables, and fall back for quick-race maps.
+#[test]
+fn campaign_lookup_picks_the_right_race() {
+    use kora::campaign;
+    let resources = pack::load(&assets());
+
+    let cases = [
+        ("ma1.map", Some((0u8, 2u32, 3u32, 4u8))),   // career race, 3 opponents
+        ("mc2.map", Some((0, 4, 3, 1))),
+        ("sp1.map", Some((3, 3, 3, 4))),
+        ("mc5.map", Some((1, 1, 3, 1))),
+        ("sp3.map", Some((2, 1, 0, 0))),             // solo time trial
+        ("1.map", None),                             // not in a campaign
+        ("19.map", None),
+    ];
+    for (map, want) in cases {
+        match (campaign::race_for(&resources, map), want) {
+            (None, None) => {}
+            (Some(setup), Some((mode, laps, opponents, theme))) => {
+                assert_eq!(setup.config.mode, mode, "{map}: mode");
+                assert_eq!(setup.config.laps, laps, "{map}: laps");
+                assert_eq!(setup.config.opponents, opponents, "{map}: opponents");
+                assert_eq!(setup.config.theme, theme, "{map}: theme");
+            }
+            (got, want) => panic!(
+                "{map}: expected {want:?}, got {:?}",
+                got.map(|s| (s.config.mode, s.config.laps, s.config.opponents, s.config.theme))
+            ),
+        }
+    }
+}
+
+/// The campaign theme selects a tile variant; building either variant of a
+/// track must still produce a complete road.
+#[test]
+fn campaign_themes_still_build() {
+    let dir = assets();
+    let resources = pack::load(&dir);
+    for map in ["ma1.map", "sp1.map", "mc5.map"] {
+        let plain = scene::build_themed(&dir, &resources, map, 0);
+        let themed = scene::build_themed(&dir, &resources, map, 3);
+        assert!(!themed.meshes.is_empty(), "{map}: theme 3 produced no geometry");
+        assert_eq!(
+            themed.collision_indices.len(),
+            plain.collision_indices.len(),
+            "{map}: the collider must not depend on the theme"
+        );
+        // Theme 3 drops detail, never adds it.
+        let count = |track: &scene::Track| -> usize {
+            track.meshes.iter().map(|mesh| mesh.vertices.len()).sum()
+        };
+        assert!(
+            count(&themed) <= count(&plain),
+            "{map}: theme 3 added geometry"
+        );
+    }
+}

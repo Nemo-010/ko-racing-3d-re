@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 pub mod ai;
+pub mod campaign;
 pub mod format;
 pub mod grid;
 pub mod pack;
