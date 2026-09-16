@@ -1,5 +1,11 @@
 # K.O. Racing 3D (`KORa_17_612805.jar`) — reverse-engineering notes
 
+> **This repository was written entirely by an LLM.** Every line of it - the
+> Python tooling, these notes and the Rust port - was produced by Claude
+> (Anthropic) from the decompiled game, under human direction. No part of it
+> was hand-written by a person. The game is Jollybox's; see
+> [Authorship](#authorship).
+
 ## Target
 
 | | |
@@ -184,6 +190,34 @@ Every format the game uses to build a track or a car is now decoded; only
 Nothing in the class set executes code from the network: online data is
 parsed as plain records, and the only remote-code-ish surface is the ad
 view (it can fetch a URL) — normal for a late-2000s MIDlet.
+
+## Authorship
+
+Everything in this repository was written by an **LLM** - Claude, by Anthropic -
+in conversation, from the game's own files and the CFR decompilation. There is
+no human author of the code or of the prose: a person chose what to work on and
+when to stop, and checked some of the claims against the data, but did not write
+any of it. There is no line in the Python tools or the Rust port that a person
+typed.
+
+What that means in practice, in both directions:
+
+* **What it does buy.** Nothing is asserted without being written down, and the
+  reasoning can be checked claim by claim. Every format in
+  [`tools/README.md`](tools/README.md) is backed by a parser that consumes its
+  file to the exact final byte; the Rust port's claims are backed by tests; a
+  finding that turned out to be wrong is corrected in place with the evidence
+  rather than quietly patched. The whole trail from "what is this file" to "the
+  numbers are in a table" is in the commits.
+* **What it does not buy.** No human has read this code with an author's eye.
+  The parts that need eyes are exactly the parts that could not be checked: the
+  menu layout, the camera framing, how the rendered theme sounds, how the
+  showroom sits in frame. Those were reasoned about and never seen, because the
+  environment this was written in has no display and no speakers.
+
+Nothing here was copied from anywhere but the game. The archive, the decompiled
+classes and everything extracted from them are gitignored; the code, the prose
+and the Rust port are original, if machine-written.
 
 ## Reproducing
 

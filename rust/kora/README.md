@@ -1,5 +1,11 @@
 # K.O. Racing 3D - Rust port
 
+> **Written entirely by an LLM.** Every module, test, comment and line of this
+> port was produced by Claude (Anthropic) from the game's own resources and the
+> decompiled MIDlet, under human direction. None of it was hand-written and no
+> human has reviewed it. See the [repository
+> README](../../README.md#authorship) for what that does and does not buy.
+
 A reimplementation of the Jollybox J2ME racer *K.O. Racing 3D* (MIDlet 1.70)
 in Rust, using [macroquad](https://macroquad.rs) for rendering and
 [rapier3d](https://rapier.rs) for physics.
