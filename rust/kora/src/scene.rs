@@ -17,7 +17,7 @@ use std::path::Path;
 
 use macroquad::models::{Mesh, Vertex};
 use macroquad::prelude::*;
-use macroquad::texture::Texture2D;
+use macroquad::texture::{Image, Texture2D};
 use rapier3d::prelude::Vector as RVector;
 
 use crate::format;
@@ -66,6 +66,98 @@ impl SurfaceGrid {
     }
 }
 
+/// Turns a lookup that should wrap into one that can be clamped, since a
+/// clamped lookup is the only kind macroquad can do.
+///
+/// The models were authored against OpenGL's default `GL_REPEAT` wrapping:
+/// their texture coordinates are centred on zero and routinely run out of
+/// 0..1 (a track tile spans u 0.39..1.50, a car's unwrap u 0.54..1.41), and
+/// the artists let the lookup wrap round the texture.  miniquad's texture
+/// parameters default to `Clamp` and macroquad exposes no way to change them,
+/// so the repeat is baked into the data instead: the image is tiled over the
+/// integer window the coordinates occupy and every coordinate is rescaled
+/// into that window.  A clamped lookup in the tiled copy is then exactly a
+/// repeating lookup in the original, and it costs a couple of megabytes
+/// rather than a shader.
+///
+/// `map` sends coordinates into 0..1 and `size` gives the copy's pixels.
+#[derive(Clone, Copy, Debug)]
+pub struct Tiling {
+    origin: Vec2,
+    tiles: Vec2,
+}
+
+impl Tiling {
+    /// The tiling that covers `bounds`, which is `[u0, u1, v0, v1]`.
+    pub fn for_bounds(bounds: [f32; 4]) -> Tiling {
+        let origin = vec2(bounds[0].floor(), bounds[2].floor());
+        Tiling {
+            origin,
+            tiles: vec2(
+                (bounds[1].ceil() - origin.x).max(1.0),
+                (bounds[3].ceil() - origin.y).max(1.0),
+            ),
+        }
+    }
+
+    /// Rescale a model texture coordinate into the tiled copy.
+    pub fn map(self, uv: Vec2) -> Vec2 {
+        (uv - self.origin) / self.tiles
+    }
+
+    /// Pixel size of the tiled copy of a `width` x `height` image.
+    pub fn size(self, width: u16, height: u16) -> (usize, usize) {
+        (
+            width as usize * self.tiles.x as usize,
+            height as usize * self.tiles.y as usize,
+        )
+    }
+
+    /// True when the coordinates already fit and nothing needs copying.
+    pub fn is_identity(self) -> bool {
+        self.origin == Vec2::ZERO && self.tiles == Vec2::ONE
+    }
+}
+
+/// A texture tiled by [`Tiling`], ready to draw.
+pub struct Repeat {
+    texture: Texture2D,
+    tiling: Tiling,
+}
+
+/// The rectangle a texture is used over when it needs no tiling.
+const UNIT_UV: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
+
+impl Repeat {
+    /// Tile `image` so that a clamped lookup covers `bounds`.  `None` if that
+    /// would make an unreasonable texture.
+    pub fn build(image: &Image, bounds: [f32; 4]) -> Option<Repeat> {
+        let tiling = Tiling::for_bounds(bounds);
+        let (w, h) = (image.width as usize, image.height as usize);
+        let (tw, th) = tiling.size(image.width, image.height);
+        if w == 0 || h == 0 || tw > 4096 || th > 4096 {
+            return None;
+        }
+        let mut bytes = vec![0u8; tw * th * 4];
+        for y in 0..th {
+            let source = (y % h) * w * 4;
+            let row = y * tw * 4;
+            for x in 0..tw {
+                let from = source + (x % w) * 4;
+                bytes[row + x * 4..row + x * 4 + 4]
+                    .copy_from_slice(&image.bytes[from..from + 4]);
+            }
+        }
+        let texture = Texture2D::from_rgba8(tw as u16, th as u16, &bytes);
+        texture.set_filter(FilterMode::Linear);
+        Some(Repeat { texture, tiling })
+    }
+
+    pub fn tiling(&self) -> Tiling {
+        self.tiling
+    }
+}
+
 pub struct Track {
     /// Road graph: which cells exist and which sides are drivable.
     pub grid: Grid,
@@ -74,6 +166,9 @@ pub struct Track {
     pub meshes: Vec<Mesh>,
     /// Texture resource for each mesh, parallel to `meshes`.
     pub texture_paths: Vec<String>,
+    /// Texture coordinate rectangle covered by each mesh's models, keyed by
+    /// texture resource.
+    pub uv_bounds: HashMap<String, [f32; 4]>,
     pub collision_vertices: Vec<RVector>,
     pub collision_indices: Vec<[u32; 3]>,
     /// Edge barriers as `(centre, half extents)` in macroquad space.
@@ -83,18 +178,28 @@ pub struct Track {
 }
 
 impl Track {
-    /// Upload every batch's texture.  Needs a live macroquad graphics context.
+    /// Upload every batch's texture, tiled over the coordinates its meshes
+    /// actually use, and pull those coordinates back into the tiled range.
+    /// Needs a live macroquad graphics context.
     pub fn attach_textures(&mut self, res: &Resources) {
-        let mut cache: HashMap<String, Texture2D> = HashMap::new();
+        let mut cache: HashMap<String, Repeat> = HashMap::new();
         for (mesh, path) in self.meshes.iter_mut().zip(self.texture_paths.iter()) {
             if !cache.contains_key(path) {
-                if let Some(bytes) = res.get(path.trim_start_matches('/')) {
-                    let texture = Texture2D::from_file_with_format(bytes, Some(ImageFormat::Png));
-                    texture.set_filter(FilterMode::Linear);
-                    cache.insert(path.clone(), texture);
-                }
+                let bounds = self.uv_bounds.get(path).copied().unwrap_or(UNIT_UV);
+                let built = res.get(path.trim_start_matches('/')).and_then(|bytes| {
+                    Image::from_file_with_format(bytes, Some(ImageFormat::Png)).ok()
+                });
+                let Some(repeat) = built.and_then(|image| Repeat::build(&image, bounds)) else {
+                    continue;
+                };
+                cache.insert(path.clone(), repeat);
             }
-            mesh.texture = cache.get(path).cloned();
+            if let Some(repeat) = cache.get(path) {
+                for vertex in mesh.vertices.iter_mut() {
+                    vertex.uv = repeat.tiling().map(vertex.uv);
+                }
+                mesh.texture = Some(repeat.texture.clone());
+            }
         }
     }
 }
@@ -213,6 +318,9 @@ impl Batch {
 struct Builder<'a> {
     res: &'a Resources,
     batches: HashMap<String, Batch>,
+    /// Texture coordinate rectangle each texture's models cover, so the atlas
+    /// can be tiled to suit them.
+    uv_bounds: HashMap<String, [f32; 4]>,
 }
 
 impl<'a> Builder<'a> {
@@ -220,6 +328,7 @@ impl<'a> Builder<'a> {
         Builder {
             res,
             batches: HashMap::new(),
+            uv_bounds: HashMap::new(),
         }
     }
 
@@ -235,6 +344,17 @@ impl<'a> Builder<'a> {
         let Some(model) = parse_model(self.res, model_path) else {
             return;
         };
+
+        let bounds = self
+            .uv_bounds
+            .entry(texture_path.to_string())
+            .or_insert([f32::MAX, f32::MIN, f32::MAX, f32::MIN]);
+        for &[u, v] in &model.texcoords {
+            bounds[0] = bounds[0].min(u);
+            bounds[1] = bounds[1].max(u);
+            bounds[2] = bounds[2].min(v);
+            bounds[3] = bounds[3].max(v);
+        }
 
         let (cos, sin) = (yaw.cos(), yaw.sin());
         let mut geometry: Vec<[Vec3; 3]> = Vec::new();
@@ -475,7 +595,9 @@ pub fn build_detailed(
             0.0,
         ));
 
-    let Builder { batches, .. } = builder;
+    let Builder {
+        batches, uv_bounds, ..
+    } = builder;
 
     // Physics ground.  The MIDlet samples each tile's collision mesh for
     // height and falls back to a flat plane at zero when the tile has none -
@@ -612,6 +734,7 @@ pub fn build_detailed(
         surface,
         meshes,
         texture_paths,
+        uv_bounds,
         collision_vertices,
         collision_indices,
         walls,
@@ -625,6 +748,8 @@ pub struct CarGeometry {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u16>,
     pub texture_path: String,
+    /// Texture coordinate rectangle the unwrap covers.
+    pub uv_bounds: [f32; 4],
     pub half_extents: Vec3,
 }
 
@@ -640,6 +765,8 @@ pub fn build_car(res: &Resources, car: &format::Car) -> Option<CarGeometry> {
     let (min, max) = model.bounds();
     let centre_y = 0.5 * (min[2] + max[2]) * scale[2];
 
+    let (mut u0, mut v0) = (f32::MAX, f32::MAX);
+    let (mut u1, mut v1) = (f32::MIN, f32::MIN);
     let mut vertices = Vec::new();
     let mut indices: Vec<u16> = Vec::new();
     for face in model.triangles() {
@@ -647,11 +774,12 @@ pub fn build_car(res: &Resources, car: &format::Car) -> Option<CarGeometry> {
         for &i in &face {
             let v = model.positions[i];
             let p = vec3(v[0] * scale[0], v[2] * scale[2] - centre_y, -v[1] * scale[1]);
-            vertices.push(Vertex::new2(
-                p,
-                vec2(model.texcoords[i][0], model.texcoords[i][1]),
-                WHITE,
-            ));
+            let uv = model.texcoords[i];
+            u0 = u0.min(uv[0]);
+            u1 = u1.max(uv[0]);
+            v0 = v0.min(uv[1]);
+            v1 = v1.max(uv[1]);
+            vertices.push(Vertex::new2(p, vec2(uv[0], uv[1]), WHITE));
         }
         indices.extend_from_slice(&[base, base + 1, base + 2]);
     }
@@ -660,6 +788,7 @@ pub fn build_car(res: &Resources, car: &format::Car) -> Option<CarGeometry> {
         vertices,
         indices,
         texture_path: format!("tex/{}", car.texture),
+        uv_bounds: [u0, u1, v0, v1],
         half_extents: vec3(
             (max[0] - min[0]) * 0.5 * scale[0],
             (max[2] - min[2]) * 0.5 * scale[2],
@@ -668,10 +797,18 @@ pub fn build_car(res: &Resources, car: &format::Car) -> Option<CarGeometry> {
     })
 }
 
-/// Upload a car texture.  Needs a live macroquad graphics context.
-pub fn load_car_texture(res: &Resources, geometry: &CarGeometry) -> Option<Texture2D> {
-    let bytes = res.get(geometry.texture_path.trim_start_matches('/'))?;
-    let texture = Texture2D::from_file_with_format(bytes, Some(ImageFormat::Png));
-    texture.set_filter(FilterMode::Linear);
-    Some(texture)
+/// Upload a car texture, tiled over the unwrap's coordinates (see [`Repeat`]),
+/// and pull the unwrap back into the tiled range.  Needs a live macroquad
+/// graphics context.
+pub fn load_car_texture(res: &Resources, geometry: &mut CarGeometry) -> Option<Texture2D> {
+    let image = Image::from_file_with_format(
+        res.get(geometry.texture_path.trim_start_matches('/'))?,
+        Some(ImageFormat::Png),
+    )
+    .ok()?;
+    let repeat = Repeat::build(&image, geometry.uv_bounds)?;
+    for vertex in geometry.vertices.iter_mut() {
+        vertex.uv = repeat.tiling().map(vertex.uv);
+    }
+    Some(repeat.texture.clone())
 }

@@ -36,6 +36,11 @@ the last two do the same job for the texture coordinates.  Every strip in
 the shipped assets is 3 vertices long, i.e. a plain triangle; strips longer
 than 3 are still handled correctly on export.
 
+The texture coordinates come out centred on zero and often outside 0..1,
+because M3G - like the OpenGL underneath it - wraps a lookup rather than
+clamping it.  They are exported exactly as the mesh stores them, so a viewer
+that clamps instead of wrapping will show the wrong texels.
+
 A ``_r`` suffix in a model name (e.g. ``rally_r``) marks the mirrored copy
 used for the render-to-texture reflection, and is parsed identically.
 """
@@ -123,7 +128,7 @@ class Model:
                              position_scale * y + p_off,
                              position_scale * z + p_off))
             texcoords.append((texcoord_scale * u + t_off,
-                              1.0 - (texcoord_scale * v + t_off)))
+                              texcoord_scale * v + t_off))
 
         strip_count = read_u8()
         strip_lengths = list(blob[pos:pos + strip_count])

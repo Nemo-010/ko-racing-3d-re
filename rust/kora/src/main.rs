@@ -124,8 +124,8 @@ fn start_race(
     let car_def = resources
         .get(&format!("cars/{car_file}"))
         .and_then(|bytes| kora::format::Car::parse(bytes))?;
-    let geometry = scene::build_car(resources, &car_def)?;
-    let texture = scene::load_car_texture(resources, &geometry);
+    let mut geometry = scene::build_car(resources, &car_def)?;
+    let texture = scene::load_car_texture(resources, &mut geometry);
     let tuning = Tuning::from_stats(car_def.stats);
 
     let laps = env_number("KORA_LAPS", 99).unwrap_or(event.laps).max(1);
@@ -283,6 +283,15 @@ impl Running {
         let desired = position - forward * back + up * height;
         self.camera = self.camera.lerp(desired, (dt * 5.0).min(1.0));
 
+        // The sky is a 2D backdrop, the way M3G draws a `Background` into the
+        // viewport before the scene, so it belongs under the default (screen)
+        // camera.  Drawing it after `set_camera` would instead drop the whole
+        // image into the world as a 1280x720 quad standing at the origin.
+        match &self.sky {
+            Some(sky) if settings.background => sky.draw(),
+            _ => clear_background(Color::new(0.53, 0.81, 0.92, 1.0)),
+        }
+
         let mut camera = Camera3D::default();
         camera.position = self.camera;
         camera.target = position + forward * 3.0 + up * 0.8;
@@ -295,10 +304,6 @@ impl Running {
         camera.z_far = settings.visibility.far_plane();
         set_camera(&camera);
 
-        match &self.sky {
-            Some(sky) if settings.background => sky.draw(),
-            _ => clear_background(Color::new(0.53, 0.81, 0.92, 1.0)),
-        }
         for mesh in &self.track.meshes {
             draw_mesh(mesh);
         }
@@ -458,8 +463,8 @@ async fn main() {
         .filter_map(|car| {
             let definition =
                 format::Car::parse(resources.get(&format!("cars/{}", car.file))?)?;
-            let geometry = scene::build_car(&resources, &definition)?;
-            let texture = scene::load_car_texture(&resources, &geometry);
+            let mut geometry = scene::build_car(&resources, &definition)?;
+            let texture = scene::load_car_texture(&resources, &mut geometry);
             Some((geometry, texture))
         })
         .collect();

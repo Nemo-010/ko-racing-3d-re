@@ -5,7 +5,9 @@
 
 use std::path::PathBuf;
 
-use macroquad::prelude::{vec3, Vec3};
+use macroquad::prelude::{vec2, vec3, Vec3};
+use macroquad::texture::Image;
+use macroquad::prelude::ImageFormat;
 use kora::physics::{CarControl, Tuning, World};
 use kora::{format, pack, scene};
 
@@ -1819,4 +1821,199 @@ fn the_repository_root_tree_loads() {
         !resources.keys().any(|name| name.ends_with(".obj")),
         "the Wavefront files were loaded as resources"
     );
+}
+
+/// The texture coordinates are the mesh's own M3G values, and M3G measures v
+/// downwards from the top left of the image, which is where macroquad measures
+/// it from too - so nothing is flipped on the way in.
+///
+/// A flip is easy to introduce and hard to notice, because the wrong way round
+/// still samples *a* picture.  It is not, however, the car: the bodywork, the
+/// glass and the livery live on the side the coordinates actually point at.
+/// Sample the texel each triangle's middle asks for and count how many differ
+/// from the texture's background colour.  On `tex/rally.png` the bodywork comes
+/// up in 86% of them and the empty blue field above the car in none.
+#[test]
+fn car_texture_coordinates_land_on_the_car() {
+    let resources = pack::load(&assets());
+    let mut checked = 0;
+    for (name, data) in resources.iter() {
+        if !name.starts_with("cars/") || !name.ends_with(".car") {
+            continue;
+        }
+        let car = format::Car::parse(data).unwrap();
+        let Some(model) = resources
+            .get(&format!("models/{}", car.model))
+            .and_then(|bytes| format::Model::parse(bytes))
+        else {
+            continue;
+        };
+        let image = Image::from_file_with_format(
+            &resources[&format!("tex/{}", car.texture)],
+            Some(ImageFormat::Png),
+        )
+        .expect("car texture decodes");
+        let upright = catalogue_coverage(&image, &model, false);
+        let flipped = catalogue_coverage(&image, &model, true);
+        assert!(
+            upright >= flipped,
+            "{name}: flipping the texture coordinates finds more of the car \
+             ({flipped:.2}) than leaving them alone ({upright:.2})"
+        );
+        if name == "cars/rally.car" {
+            assert!(
+                upright > 0.6 && flipped < 0.2,
+                "cars/rally.car: the unwrap covers {upright:.2} of the livery, \
+                 and {flipped:.2} of it when mirrored"
+            );
+        }
+        checked += 1;
+    }
+    assert!(checked >= 8, "expected the whole car set, saw {checked}");
+}
+
+/// Fraction of a model's triangle middles whose texel is not the texture's most
+/// common quantised colour, i.e. how much of the picture the model covers.
+fn catalogue_coverage(image: &Image, model: &format::Model, flip_v: bool) -> f32 {
+    let background = modal_colour(image);
+    let (width, height) = (image.width as usize, image.height as usize);
+    let mut covered = 0;
+    let mut total = 0;
+    for face in model.triangles() {
+        let (mut u, mut v) = (0.0f32, 0.0f32);
+        for &i in &face {
+            u += model.texcoords[i][0];
+            v += model.texcoords[i][1];
+        }
+        let u = (u / 3.0).rem_euclid(1.0);
+        let v = (v / 3.0).rem_euclid(1.0);
+        // What the port did before: `1.0 - v`, which mirrors the picture.
+        let v = if flip_v { (1.0 - v) % 1.0 } else { v };
+        let offset = ((v * height as f32) as usize % height) * width
+            + (u * width as f32) as usize % width;
+        let pixel = &image.bytes[offset * 4..offset * 4 + 3];
+        let distance: i32 = (0..3)
+            .map(|k| (pixel[k] as i32 - background[k]).abs())
+            .sum();
+        covered += usize::from(distance > 60);
+        total += 1;
+    }
+    covered as f32 / total as f32
+}
+
+/// The colour the texture is mostly made of, quantised so that a gradient or a
+/// compression artefact still counts as background.
+fn modal_colour(image: &Image) -> [i32; 3] {
+    let mut counts: std::collections::HashMap<[u8; 3], usize> = std::collections::HashMap::new();
+    for pixel in image.bytes.chunks_exact(4) {
+        *counts
+            .entry([pixel[0] / 16, pixel[1] / 16, pixel[2] / 16])
+            .or_default() += 1;
+    }
+    let key = counts
+        .iter()
+        .max_by_key(|(_, count)| **count)
+        .map(|(key, _)| *key)
+        .expect("a texture has pixels");
+    [
+        key[0] as i32 * 16 + 8,
+        key[1] as i32 * 16 + 8,
+        key[2] as i32 * 16 + 8,
+    ]
+}
+
+/// The models rely on `GL_REPEAT`: their texture coordinates are centred on
+/// zero and leave 0..1, because the authors let the lookup wrap.  macroquad has
+/// no wrap mode, so [`scene::Tiling`] copies the atlas over the window the
+/// coordinates occupy and rescales them into it.  Every mesh of every track has
+/// to end up inside its own copy, or the clamped lookup smears an edge across
+/// the polygon - which is what turned the tracks into a mess.
+#[test]
+fn every_track_texture_coordinate_fits_its_tiled_atlas() {
+    let dir = assets();
+    let resources = pack::load(&dir);
+    let mut maps: Vec<String> = resources
+        .keys()
+        .filter(|name| name.starts_with("levels/") && name.ends_with(".map"))
+        .map(|name| name.trim_start_matches("levels/").to_string())
+        .collect();
+    maps.sort();
+    assert_eq!(maps.len(), 40);
+    let mut tiled: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
+    for name in maps {
+        let track = scene::build(&dir, &resources, &name);
+        for (mesh, path) in track.meshes.iter().zip(track.texture_paths.iter()) {
+            let bounds = track.uv_bounds[path];
+            let tiling = scene::Tiling::for_bounds(bounds);
+            if tiling.is_identity() {
+                continue;
+            }
+            for vertex in &mesh.vertices {
+                let mapped = tiling.map(vertex.uv);
+                assert!(
+                    (-1e-4..=1.0 + 1e-4).contains(&mapped.x)
+                        && (-1e-4..=1.0 + 1e-4).contains(&mapped.y),
+                    "{name}: {path} vertex at {:?} maps to {:?}, outside the copy",
+                    vertex.uv,
+                    mapped
+                );
+            }
+            // The copy has to be a size the driver will take, and small enough
+            // that baking the wrap stays cheaper than a shader.
+            let image = Image::from_file_with_format(
+                &resources[path.trim_start_matches('/')],
+                Some(ImageFormat::Png),
+            )
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
+            let size = tiling.size(image.width, image.height);
+            assert!(
+                size.0 <= 4096 && size.1 <= 4096,
+                "{name}: {path} needs a {}x{} copy",
+                size.0,
+                size.1
+            );
+            tiled.insert(path.clone(), size);
+        }
+    }
+    assert!(!tiled.is_empty(), "no track needed a tiled atlas");
+    let largest = tiled.values().map(|size| size.0 * size.1).max().unwrap();
+    assert!(
+        largest <= 512 * 512,
+        "the biggest tiled atlas is {largest} texels"
+    );
+}
+
+/// A tiled copy has to be indistinguishable from a repeating lookup: the texel
+/// a coordinate asks for must be the one it asks for in the original image,
+/// modulo the image.  Also check the window is the smallest that covers the
+/// coordinates, since a copy nine times too big is nine times the texture.
+#[test]
+fn tiling_a_texture_is_the_same_as_wrapping_it() {
+    // A car unwrap: u spans -0.49..0.49, v spans 0.514..1.493.
+    let tiling = scene::Tiling::for_bounds([-0.49, 0.49, 0.514, 1.493]);
+    assert_eq!(tiling.size(128, 128), (256, 256), "window is [-1,1] x [0,2]");
+    for step in 0..=100 {
+        let t = step as f32 / 100.0;
+        let u = -0.49 + t * 0.98;
+        let v = 0.514 + t * 0.979;
+        let mapped = tiling.map(vec2(u, v));
+        assert!(
+            (0.0..=1.0).contains(&mapped.x) && (0.0..=1.0).contains(&mapped.y),
+            "{u} {v} maps to {mapped:?}"
+        );
+        // Walking into the copy is walking off the end of the image and back
+        // on at the start, which is what the sampler would have done.
+        for (coordinate, along) in [(u, mapped.x), (v, mapped.y)] {
+            let texel = (along * 256.0) as i32 % 128;
+            let wanted = (coordinate.rem_euclid(1.0) * 128.0) as i32;
+            assert!(
+                (texel - wanted).abs() <= 1,
+                "{coordinate} landed on texel {texel} of the copy, not {wanted}"
+            );
+        }
+    }
+    // Coordinates that already fit must not be copied at all.
+    let inside = scene::Tiling::for_bounds([0.1, 0.9, 0.2, 0.8]);
+    assert!(inside.is_identity(), "{inside:?}");
+    assert_eq!(inside.size(128, 128), (128, 128));
 }

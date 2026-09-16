@@ -110,10 +110,10 @@ impl Model {
                 pos_scale * y + pos_offset,
                 pos_scale * z + pos_offset,
             ]);
-            texcoords.push([
-                tex_scale * u + tex_offset,
-                1.0 - (tex_scale * v + tex_offset),
-            ]);
+            // M3G puts the texture origin at the top left, which is also
+            // where macroquad's v = 0 is, so no flip.  See `Repeat` in
+            // scene.rs for what to do about the range.
+            texcoords.push([tex_scale * u + tex_offset, tex_scale * v + tex_offset]);
         }
 
         let strip_count = r.u8() as usize;

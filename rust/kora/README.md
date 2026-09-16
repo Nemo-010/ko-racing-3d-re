@@ -212,6 +212,9 @@ macroquad context.
 | `upgrades_make_a_car_quicker` | a maxed car reaches a higher speed than a stock one |
 | `race_modes_are_named_by_the_game` | the seven mode names, and that the clock-carrying modes are the non-circuit ones |
 | `the_label_table_is_well_formed` | the TSV parses, keys are unique, every key the code uses resolves, placeholders fill |
+| `car_texture_coordinates_land_on_the_car` | the texture coordinates are not flipped: they land on the bodywork, glass and livery, not the empty field beside them |
+| `every_track_texture_coordinate_fits_its_tiled_atlas` | every mesh of every track keeps its coordinates inside the tiled copy of its atlas |
+| `tiling_a_texture_is_the_same_as_wrapping_it` | a lookup in the tiled copy is a wrapping lookup in the original, and needs no copy when the coordinates already fit |
 
 ## No paywall, no server
 
@@ -374,6 +377,31 @@ static node scale the game applies to tile/detail/object models is
 `ar.a` = **7.01**, and one map cell's world position is `cell * 14`.  The car,
 unlike the tiles, is *not* scaled by `ar.a` - it keeps its natural model size.
 Direction indices match the MIDlet: 0 = +X, 1 = -Y, 2 = -X, 3 = +Y.
+
+### Textures
+
+M3G measures texture coordinates from the **top left** of the image with `v`
+growing downwards, which is where macroquad measures them from too, so the
+coordinates are used exactly as the mesh stores them - **there is no `1 - v`
+anywhere**.  (A vertical flip still samples a picture, just the wrong one, so
+`car_texture_coordinates_land_on_the_car` checks that the triangles land on the
+bodywork and the livery rather than the empty field beside it.)
+
+The models were authored against OpenGL's default `GL_REPEAT` and rely on it:
+the coordinates are centred on zero and leave 0..1 in both axes - a track tile
+spans u 0.39..1.50, a car's unwrap u 0.54..1.41 with negative v - because the
+authors let the lookup wrap round the image.  macroquad has no wrap mode at all
+(miniquad's texture parameters default to `Clamp` and nothing exposes them), and
+clamping smears an edge pixel across every polygon that leaves 0..1, which is
+what turned the tracks into a mess.
+
+`scene::Tiling`, built from the coordinates each texture is actually used over,
+emulates it instead: the image is tiled over the integer window the coordinates
+occupy and the coordinates are rescaled into that window, so a clamped lookup in
+the copy is exactly a repeating lookup in the original.  The floor of an atlas
+that needs it is 512x512, about 2.5 MB across the whole game, and no shader.
+`every_track_texture_coordinate_fits_its_tiled_atlas` checks that every mesh of
+every track ends up inside its own copy.
 
 ## glam versions
 
