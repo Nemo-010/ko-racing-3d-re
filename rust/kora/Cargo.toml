@@ -8,5 +8,10 @@ description = "Rust reimplementation of the K.O. Racing 3D (Jollybox) racing eng
 macroquad = "0.4.16"
 rapier3d = "0.35"
 
+[dev-dependencies]
+# Already in the tree behind macroquad; used to check the bundled font parses
+# and covers the characters the interface draws, which needs no window.
+fontdue = "0.9"
+
 [profile.release]
 opt-level = 2

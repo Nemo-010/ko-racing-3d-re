@@ -22,6 +22,9 @@
 /rust/kora/assets/data.*
 /rust/kora/assets/lists/
 
+# Uploaded attachments, unpacked into the tree proper.
+/attachments/
+
 # Scratch
 *.obj
 __pycache__/

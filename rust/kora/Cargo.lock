@@ -272,6 +272,7 @@ dependencies = [
 name = "kora"
 version = "0.1.0"
 dependencies = [
+ "fontdue",
  "macroquad",
  "rapier3d",
 ]

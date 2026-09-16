@@ -89,10 +89,10 @@ pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, tit
             draw_rectangle(24.0, y - 3.0, screen_width() - 48.0, row - 3.0, HIGHLIGHT);
         }
         let color = if open { WHITE } else { LOCKED };
-        text::draw_shadow(&format!("{:<16}", event.name), 32.0, y, 20.0, color);
-        text::draw_shadow(&format!("{:<10}", event.map), 260.0, y, 20.0, color);
-        text::draw_shadow(&format!("{:<4}", event.laps), 440.0, y, 20.0, color);
-        text::draw_shadow(&format!("{:<3}", event.opponents), 490.0, y, 20.0, color);
+        text::draw_shadow(&event.name, 32.0, y, 20.0, color);
+        text::draw_shadow(&event.map, 270.0, y, 20.0, color);
+        text::draw_shadow(&event.laps.to_string(), 440.0, y, 20.0, color);
+        text::draw_shadow(&event.opponents.to_string(), 490.0, y, 20.0, color);
         if open {
             let medal = progress.best(&event.key);
             text::draw_shadow(medal_name(medal), 540.0, y, 20.0, medal_color(medal));
@@ -131,13 +131,13 @@ pub fn draw_cars(cars: &[CarInfo], progress: &Progress, cursor: usize) {
         }
         let selected = index == progress.car;
         text::draw_shadow(
-            &format!("{:<14}", car.name),
+            &car.name,
             32.0,
             y,
             23.0,
             if selected { ACCENT } else { WHITE },
         );
-        text::draw_shadow(&format!("{:<14}", car.file), 400.0, y, 16.0, LOCKED);
+        text::draw_shadow(&car.file, 400.0, y, 15.0, LOCKED);
         for (stat, value) in car.stats.iter().enumerate() {
             let by = y + 16.0 + stat as f32 * 9.0;
             text::draw_shadow(LABELS[stat], 400.0, by, 12.0, LOCKED);

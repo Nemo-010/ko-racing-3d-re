@@ -85,6 +85,7 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
 ## Layout
 
 ```
+fonts/           Contrail One + its OFL licence (bundled via include_bytes)
 src/pack.rs      resource archive reader
 src/progress.rs  medals, points, car list and the save file
 src/menu.rs      every screen outside the race
@@ -128,15 +129,22 @@ macroquad context.
 | `medals_and_points_persist` | medal rules, points only for an improvement, save/load |
 | `career_and_quick_lists_are_built` | the 47 career events, the 40 quick-race tracks and the 8 cars |
 | `a_race_runs_to_the_flag_and_scores` | a whole 2-lap race with four AI cars, scored as the results screen does |
+| `the_bundled_font_covers_the_interface` | the bundled face parses, covers every character the UI builds, and rasterises |
 
 ## Text
 
-Everything on screen goes through macroquad's own text renderer, which
-rasterises glyphs with `fontdue` at whatever pixel size is asked for, so the
-menus and HUD stay sharp at every scale.  `src/text.rs` is a thin wrapper that
-keeps the callers thinking in "top of a line" coordinates and adds a drop
-shadow; the default `ProggyClean` face is monospaced, which suits the columnar
-event and car lists.
+Everything on screen is set in **Contrail One**, bundled in `fonts/` and
+rasterised by macroquad's own text renderer (`fontdue`) at whatever pixel size
+is asked for, so the menus and HUD stay sharp at every scale.  `src/text.rs`
+loads the face once and wraps `measure_text` / `draw_text_ex`, keeping the
+callers thinking in "top of a line" coordinates and adding a drop shadow.
+Because the face is proportional, the event and car lists draw each column at
+its own x rather than padding with spaces.
+
+Contrail One is Copyright (c) 2011 Sorkin Type Co and released under the **SIL
+Open Font License 1.1**; the licence ships with it at `fonts/OFL.txt`.  The
+reserved font names are "Contrail" and "Contrail One", so the file is
+redistributed unmodified and under its own name.
 
 The pack's own fonts are still fully decoded - `python3 -m kora font` prints a
 font's metrics and character map and `python3 -m kora fontimg` renders sample

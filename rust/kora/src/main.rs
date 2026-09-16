@@ -337,6 +337,8 @@ impl Running {
 
 #[macroquad::main("K.O. Racing 3D - Rust port")]
 async fn main() {
+    text::init();
+
     let dir = assets_dir();
     println!("resource pack: {}", dir.display());
     let resources = pack::load(&dir);

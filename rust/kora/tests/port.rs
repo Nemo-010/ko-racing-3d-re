@@ -864,3 +864,53 @@ fn a_race_runs_to_the_flag_and_scores() {
     sorted.dedup();
     assert_eq!(sorted.len(), cars);
 }
+
+/// The bundled face has to parse and cover everything the interface draws.
+/// This is the only part of text handling that can be checked without a
+/// window: macroquad rasterises through a live graphics context.
+#[test]
+fn the_bundled_font_covers_the_interface() {
+    let bytes = include_bytes!("../fonts/ContrailOne-Regular.ttf");
+    let font = fontdue::Font::from_bytes(&bytes[..], fontdue::FontSettings::default())
+        .expect("the bundled Contrail One should parse");
+
+    // Every character any string in the UI can contain: the leaderboard and
+    // results rows, the stat labels, and the formatted numbers and times.
+    // Map files and car files are lower case ("ma1.map", "rally.car").
+    let used = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /:.-+()";
+    for ch in used.chars() {
+        assert_ne!(
+            font.lookup_glyph_index(ch),
+            0,
+            "the bundled font has no glyph for {ch:?}"
+        );
+    }
+
+    // And the strings the screens actually build are all covered.
+    let samples = [
+        "K.O. RACING 3D",
+        "CAREER POINTS 12",
+        "TIMBERTON",
+        "ma1.map",
+        "0:12.34",
+        "+3  (total 9)",
+        "POS 1/4",
+        "NEED 27",
+        "SPEED",
+        "GOLD",
+        "ARROWS SELECT   ENTER CONFIRM   ESC BACK",
+    ];
+    for sample in samples {
+        for ch in sample.chars() {
+            assert!(
+                used.contains(ch),
+                "{sample:?} uses {ch:?}, which the font test does not cover"
+            );
+        }
+    }
+
+    // A rendered glyph is a real bitmap, not an empty box.
+    let (metrics, bitmap) = font.rasterize('A', 32.0);
+    assert!(metrics.width > 4 && metrics.height > 4, "A at 32px is {metrics:?}");
+    assert!(bitmap.iter().any(|byte| *byte > 0), "A rasterised blank");
+}
