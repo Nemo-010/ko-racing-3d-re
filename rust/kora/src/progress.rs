@@ -28,11 +28,11 @@ pub const CARS: [&str; 8] = [
 /// car, SPIRIT 320, carries, so it is the ceiling the original implies.
 pub const MAX_STAT: u8 = 6;
 
-/// The four values a `.car` file carries are drawn in the garage as
-/// speed, grip, accel and brakes.  Higher is better in all four, which is what
-/// makes an upgrade unambiguous; the labels are the port's, because the
-/// original's own are packed image blobs.
-pub const STAT_NAMES: [&str; 4] = ["SPEED", "GRIP", "ACCEL", "BRAKES"];
+/// The four values a `.car` file carries, under the game's own names.  The
+/// MIDlet draws them as `aq.a(127 + i)`, and `ui/ui.txt` gives those ids as
+/// SPEED, ACCELERATION, BRAKING and HANDLING in that order.  Higher is better
+/// in all four, which is what makes an upgrade unambiguous.
+pub const STAT_NAMES: [&str; 4] = ["SPEED", "ACCELERATION", "BRAKING", "HANDLING"];
 
 /// Career points needed to raise a stat from `value` to `value + 1`.
 pub const fn upgrade_cost(value: u8) -> u32 {

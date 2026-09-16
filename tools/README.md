@@ -315,6 +315,35 @@ font's metrics and table; ``python3 -m kora fontimg`` renders sample text.
 | `*.png_l` textures | low-detail variants; ordinary PNG data with a `_l` suffix. |
 | `sounds/*` | `.amr` clips referenced by `as.java` are **not in the pack**; only `sounds/theme.mid` ships in the JAR. |
 
+## UI text (`ui/*.txt`)
+
+The MIDlet's own labels are not images.  `aq.a(int)` returns the encoded text
+for a label id, and it delegates to a `f` instance that reads `/ui/ui.txt` as
+UTF-8 lines of the form ``id:text`` (the one id it treats specially is 231,
+which lands in `al.e`).  Five files ship: `ui.txt` (the interface), plus
+`help.txt`, `online.txt`, `full.txt` and `bob.txt`.
+
+Two ranges matter for the port:
+
+```
+127 SPEED         128 ACCELERATION   129 BRAKING      130 HANDLING
+```
+
+drawn as ``aq.a(127 + i)`` beside each car's four values, so the order in a
+`.car` is speed, acceleration, braking, handling;
+
+```
+202 CIRCUIT  203 RACE  204 TIME CHASE  205 SURVIVAL
+206 HEAD TO HEAD  207 SLIDESHOW  208 SPECIAL
+```
+
+which is one per game mode, in the same order as the mode byte of a `.000`
+race record - and the three that carry a clock instead of a starting grid
+(modes 2, 5 and 6) are exactly TIME CHASE, SLIDESHOW and SPECIAL.
+
+There is no label for a garage or an upgrade anywhere in the file, which is
+consistent with there being no economy in the build at all.
+
 ## Rust port
 
 `rust/kora/` reimplements the engine in Rust (macroquad + rapier3d) and reads

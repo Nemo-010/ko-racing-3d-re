@@ -20,13 +20,13 @@ const CHASSIS_MASS: f32 = 1100.0;
 /// Per-car handling, derived from the four values a `.car` file carries and
 /// any upgrades bought in the garage.
 ///
-/// The MIDlet only ever draws those four as bars - its car reads its own
+/// The names come from the game itself: `aq.a(127 + i)` draws them and
+/// `ui/ui.txt` gives those ids as SPEED, ACCELERATION, BRAKING and HANDLING.
+/// What the MIDlet *does* with them is not recoverable - its car reads its own
 /// tuning from elsewhere, and the 39 bytes that follow the stats in every
-/// `.car` are never read by this build - so the mapping is the port's, chosen
-/// so the first car in the list (`rally.car`, stats 3/5/5/1) lands on the
-/// constants the port was calibrated with.  All four read as "more is better",
-/// which is what makes an upgrade unambiguous, and 6 is the ceiling because
-/// that is what the game's own best car, SPIRIT 320, carries.
+/// `.car` are never read by this build - so the mapping below follows those
+/// names, and is calibrated so the first car in `ba.a`'s list (`rally.car`,
+/// stats 3/5/5/1) lands back on the constants the port was tuned with.
 #[derive(Clone, Copy)]
 pub struct Tuning {
     pub engine_force: f32,
@@ -43,15 +43,19 @@ impl Default for Tuning {
 }
 
 impl Tuning {
-    /// `stats` are speed, grip, accel and brakes, each 1..=6 before upgrades.
+    /// `stats` are speed, acceleration, braking and handling, each 1..=6
+    /// before upgrades.  Speed buys top end by lowering drag; acceleration
+    /// buys engine force; braking buys brake force; handling buys steering
+    /// angle and the grip the tyres can use.
     pub fn from_stats(stats: [u8; 4]) -> Tuning {
-        let [speed, grip, accel, brakes] = stats.map(|value| value.clamp(1, 9) as f32);
+        let [speed, acceleration, braking, handling] =
+            stats.map(|value| value.clamp(1, 9) as f32);
         Tuning {
-            engine_force: 560.0 + 60.0 * accel,
-            linear_damping: (0.26 - 0.02 * speed).max(0.05),
-            steer: 0.38 + 0.024 * grip,
-            friction: 0.75 + 0.13 * grip,
-            brake: 9.0 + 2.0 * brakes,
+            engine_force: 480.0 + 60.0 * acceleration,
+            linear_damping: (0.21 - 0.02 * speed).max(0.05),
+            steer: 0.46 + 0.04 * handling,
+            friction: 1.25 + 0.15 * handling,
+            brake: 6.0 + 1.6 * braking,
         }
     }
 }

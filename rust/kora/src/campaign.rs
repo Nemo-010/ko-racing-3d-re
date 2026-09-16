@@ -83,6 +83,28 @@ pub fn race_for(resources: &Resources, map_name: &str) -> Option<RaceSetup> {
     None
 }
 
+/// The seven game modes, under the names the game gives them: `ui/ui.txt`
+/// ids 202-208 are CIRCUIT, RACE, TIME CHASE, SURVIVAL, HEAD TO HEAD,
+/// SLIDESHOW and SPECIAL, in the same order as the mode byte in a `.000`
+/// record.  Modes 2, 5 and 6 are the ones that carry a clock instead of a
+/// grid, which is exactly where TIME CHASE, SLIDESHOW and SPECIAL land.
+pub const MODE_NAMES: [&str; 7] = [
+    "CIRCUIT",
+    "RACE",
+    "TIME CHASE",
+    "SURVIVAL",
+    "HEAD TO HEAD",
+    "SLIDESHOW",
+    "SPECIAL",
+];
+
+pub fn mode_name(mode: u8) -> &'static str {
+    MODE_NAMES
+        .get(mode as usize)
+        .copied()
+        .unwrap_or("SPECIAL")
+}
+
 /// One selectable race: a campaign record plus its decoded setup.
 #[derive(Clone)]
 pub struct RaceEvent {

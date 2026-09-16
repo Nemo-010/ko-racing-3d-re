@@ -1018,35 +1018,102 @@ fn the_deluxe_campaign_opens_on_points_alone() {
     assert!(progress.open(last), "and points alone open it");
 }
 
-/// The four `.car` values reach the handling: more is better in all of them,
-/// so an upgrade can only help.
+/// The four `.car` values reach the handling, each moving its own part.
+///
+/// Their names are the game's own - `aq.a(127 + i)` draws them and `ui/ui.txt`
+/// gives those ids - so they are pinned here: a silent change would quietly
+/// relabel the garage.
 #[test]
 fn car_stats_change_the_handling() {
     use kora::physics::Tuning;
-    let slow = Tuning::from_stats([1, 1, 1, 1]);
-    let mid = Tuning::from_stats([3, 5, 5, 3]);
-    let fast = Tuning::from_stats([6, 6, 6, 6]);
+    use kora::progress::STAT_NAMES;
 
-    assert!(slow.engine_force < mid.engine_force && mid.engine_force < fast.engine_force);
-    assert!(slow.steer < mid.steer && mid.steer < fast.steer);
-    assert!(slow.friction < mid.friction && mid.friction < fast.friction);
-    assert!(slow.brake < mid.brake && mid.brake < fast.brake);
-    // Each stat moves its own thing: the brakes follow the fourth value only.
-    assert_eq!(
-        Tuning::from_stats([1, 5, 5, 1]).brake,
-        Tuning::from_stats([6, 5, 5, 1]).brake,
-        "the speed stat must not change the brakes"
-    );
-    // Top speed comes from lower damping, so the speed stat is not just more
-    // engine force.
-    assert!(fast.linear_damping < mid.linear_damping);
-    assert!(mid.linear_damping < slow.linear_damping);
+    assert_eq!(STAT_NAMES, ["SPEED", "ACCELERATION", "BRAKING", "HANDLING"]);
 
-    // The default is the first car `ba.a` lists.
+    let base = [3, 5, 5, 1];
+    let stock = Tuning::from_stats(base);
+    let raise = |stat: usize, value: u8| {
+        let mut stats = base;
+        stats[stat] = value;
+        Tuning::from_stats(stats)
+    };
+
+    // SPEED buys top end by lowering drag, and touches nothing else.
+    let quick = raise(0, 6);
+    assert!(quick.linear_damping < stock.linear_damping);
+    assert_eq!(quick.engine_force, stock.engine_force);
+    assert_eq!(quick.brake, stock.brake);
+    assert_eq!(quick.steer, stock.steer);
+
+    // ACCELERATION buys engine force, and nothing else.
+    let brisk = raise(1, 6);
+    assert!(brisk.engine_force > stock.engine_force);
+    assert_eq!(brisk.linear_damping, stock.linear_damping);
+    assert_eq!(brisk.brake, stock.brake);
+
+    // BRAKING buys brake force, and nothing else.
+    let stops = raise(2, 6);
+    assert!(stops.brake > stock.brake);
+    assert!(stops.brake > raise(2, 1).brake);
+    assert_eq!(stops.engine_force, stock.engine_force);
+    assert_eq!(stops.friction, stock.friction);
+
+    // HANDLING buys steering angle and the grip to use it.
+    let nimble = raise(3, 6);
+    assert!(nimble.steer > stock.steer);
+    assert!(nimble.friction > stock.friction);
+    assert_eq!(nimble.brake, stock.brake);
+    assert_eq!(nimble.engine_force, stock.engine_force);
+
+    // The default is the first car `ba.a` lists, sitting on the constants the
+    // port was calibrated with before the values were wired up at all.
     let default = Tuning::default();
-    let rally = Tuning::from_stats([3, 5, 5, 1]);
-    assert_eq!(default.engine_force, rally.engine_force);
-    assert_eq!(default.steer, rally.steer);
+    assert_eq!(default.engine_force, stock.engine_force);
+    assert_eq!(default.linear_damping, stock.linear_damping);
+    assert_eq!(default.steer, stock.steer);
+    assert_eq!(default.friction, stock.friction);
+    assert_eq!(default.brake, stock.brake);
+}
+
+/// The seven race modes carry the game's own names, and the three that hold a
+/// clock rather than a starting grid are the non-circuit ones.
+#[test]
+fn race_modes_are_named_by_the_game() {
+    use kora::campaign::{mode_name, MODE_NAMES};
+    use kora::format::RaceConfig;
+
+    assert_eq!(
+        MODE_NAMES,
+        [
+            "CIRCUIT",
+            "RACE",
+            "TIME CHASE",
+            "SURVIVAL",
+            "HEAD TO HEAD",
+            "SLIDESHOW",
+            "SPECIAL"
+        ]
+    );
+    for (mode, name) in MODE_NAMES.iter().enumerate() {
+        assert_eq!(mode_name(mode as u8), *name);
+    }
+    // Out of range falls back rather than panicking.
+    assert_eq!(mode_name(200), "SPECIAL");
+
+    // A time trial is exactly a mode that stores a clock, and those are TIME
+    // CHASE, SLIDESHOW and SPECIAL.
+    for mode in 0..7u8 {
+        let is_trial = [2u8, 5, 6].contains(&mode);
+        assert_eq!(
+            !RaceConfig::RACE_MODES.contains(&mode),
+            is_trial,
+            "mode {mode} ({}) disagrees about being a time trial",
+            mode_name(mode)
+        );
+        if is_trial {
+            assert!(matches!(mode_name(mode), "TIME CHASE" | "SLIDESHOW" | "SPECIAL"));
+        }
+    }
 }
 
 /// And an upgraded car really does go quicker, and still drives a track.

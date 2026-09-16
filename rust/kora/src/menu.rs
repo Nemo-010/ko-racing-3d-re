@@ -8,7 +8,7 @@
 
 use macroquad::prelude::*;
 
-use crate::campaign::RaceEvent;
+use crate::campaign::{mode_name, RaceEvent};
 use crate::progress::{medal_name, CarInfo, Progress, MAX_STAT, STAT_NAMES};
 use crate::text;
 
@@ -100,20 +100,22 @@ pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, tit
         }
         let color = if open { WHITE } else { LOCKED };
         text::draw_shadow(&event.name, 32.0, y, 20.0, color);
-        text::draw_shadow(&event.map, 270.0, y, 20.0, color);
-        text::draw_shadow(&event.laps.to_string(), 440.0, y, 20.0, color);
-        text::draw_shadow(&event.opponents.to_string(), 490.0, y, 20.0, color);
+        text::draw_shadow(&event.map, 260.0, y, 20.0, color);
+        text::draw_shadow(mode_name(event.mode), 370.0, y, 20.0, LOCKED);
+        text::draw_shadow(&event.laps.to_string(), 500.0, y, 20.0, color);
+        text::draw_shadow(&event.opponents.to_string(), 545.0, y, 20.0, color);
         if open {
             let medal = progress.best(&event.key);
-            text::draw_shadow(medal_name(medal), 540.0, y, 20.0, medal_color(medal));
+            text::draw_shadow(medal_name(medal), 590.0, y, 20.0, medal_color(medal));
         } else {
-            text::draw_shadow(&format!("NEED {}", event.threshold), 540.0, y, 20.0, LOCKED);
+            text::draw_shadow(&format!("NEED {}", event.threshold), 590.0, y, 20.0, LOCKED);
         }
     }
 
-    text::draw_shadow("LAPS", 440.0, top - 22.0, 17.0, LOCKED);
-    text::draw_shadow("CPU", 490.0, top - 22.0, 17.0, LOCKED);
-    text::draw_shadow("MEDAL", 540.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow("MODE", 370.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow("LAPS", 500.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow("CPU", 545.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow("MEDAL", 590.0, top - 22.0, 17.0, LOCKED);
     text::draw_shadow(
         &format!(
             "{} of {} events   {} points",
@@ -261,7 +263,7 @@ pub fn draw_results(event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
     let width = 460.0;
     let left = (screen_width() - width) / 2.0;
     let top = screen_height() * 0.22;
-    panel(Rect::new(left - 12.0, top - 46.0, width + 24.0, 300.0));
+    panel(Rect::new(left - 12.0, top - 46.0, width + 24.0, 330.0));
     centred(&event.name, top - 58.0, 34.0, WHITE);
 
     let line = |index: usize, label: &str, value: &str, color: Color| {
@@ -269,15 +271,16 @@ pub fn draw_results(event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
         text::draw_shadow(label, left + 20.0, y, 21.0, LOCKED);
         text::draw_shadow(value, left + width - 20.0 - text::width(value, 21.0), y, 21.0, color);
     };
-    line(0, "POSITION", &format!("{} of {}", outcome.place + 1, outcome.cars),
+    line(0, "MODE", mode_name(event.mode), LOCKED);
+    line(1, "POSITION", &format!("{} of {}", outcome.place + 1, outcome.cars),
          if outcome.place == 0 { GOLD } else { WHITE });
-    line(1, "LAPS", &format!("{}", outcome.laps), WHITE);
-    line(2, "TOTAL", &format_time(outcome.total_time), WHITE);
-    line(3, "BEST LAP", &outcome.best_lap.map(format_time).unwrap_or_else(|| "--:--".into()), ACCENT);
-    line(4, "MEDAL", medal_name(outcome.medal), medal_color(outcome.medal));
-    line(5, "POINTS", &format!("+{}  (total {})", outcome.gained, progress.points), ACCENT);
+    line(2, "LAPS", &format!("{}", outcome.laps), WHITE);
+    line(3, "TOTAL", &format_time(outcome.total_time), WHITE);
+    line(4, "BEST LAP", &outcome.best_lap.map(format_time).unwrap_or_else(|| "--:--".into()), ACCENT);
+    line(5, "MEDAL", medal_name(outcome.medal), medal_color(outcome.medal));
+    line(6, "POINTS", &format!("+{}  (total {})", outcome.gained, progress.points), ACCENT);
 
-    centred("ENTER CONTINUE", top + 224.0, 20.0, LOCKED);
+    centred("ENTER CONTINUE", top + 250.0, 20.0, LOCKED);
 }
 
 pub fn format_time(seconds: f32) -> String {

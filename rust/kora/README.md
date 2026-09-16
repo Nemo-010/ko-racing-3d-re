@@ -74,7 +74,9 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
   between two tiles instead of being trapped by them.
 * **Menus** (`menu`) - main menu, the career event list, the deluxe list, a
   quick-race list of all 40 tracks, car selection, the garage, a pause menu and
-  a results panel.  Locked events grey out and show the points they need.
+  a results panel.  Locked events grey out and show the points they need, and
+  each event carries the game's own name for its mode (CIRCUIT, RACE, TIME
+  CHASE, SURVIVAL, HEAD TO HEAD, SLIDESHOW, SPECIAL).
 * **Career progress** (`progress`) - medals and points.  A race's entry
   threshold and award come from its `.000` record, the medal from the finishing
   position (gold, silver, bronze), and a better medal on a race already won
@@ -138,6 +140,7 @@ macroquad context.
 | `the_deluxe_campaign_opens_on_points_alone` | the 13 deluxe events are extra tracks, opened by points with nothing else consulted |
 | `car_stats_change_the_handling` | each of the four values moves its own part of the tuning |
 | `upgrades_make_a_car_quicker` | a maxed car reaches a higher speed than a stock one |
+| `race_modes_are_named_by_the_game` | the seven mode names, and that the clock-carrying modes are the non-circuit ones |
 
 ## No paywall, no server
 
@@ -231,8 +234,9 @@ as-is.
 
 * the mid-race HUD of the original (its rival-position arrows, speedometer and
   minimap); the `.bck` backgrounds;
-* the original's own menu art and text, which live in packed images and text
-  blobs - the port draws its screens from the tables instead;
+* the original's own menu *layout*: its labels are read (`ui/ui.txt`, plain
+  text) and used where a screen needs one, but the screens themselves are the
+  port's, since the MIDlet positions every one of them by hand;
 * the exact original medal rule: the tables give each race an entry threshold
   and an award, but what *performance* earns the medal is not in them, so the
   port uses the finishing position;
