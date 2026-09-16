@@ -25,6 +25,7 @@ cargo test --release                     # headless checks
 | --- | --- | --- |
 | `KORA_ASSETS` | `assets` | directory holding `data`, `data.*` and `lists/` |
 | `KORA_SAVE` | `kora-save.txt` | where points, best times and the chosen car are kept |
+| `KORA_MUSIC` | unset | set to `0` to start with the music off |
 | `KORA_SKIP_MENU` | unset | set to boot straight into a race |
 | `KORA_MAP` | `1.map` | track for `KORA_SKIP_MENU` (any of the 40) |
 | `KORA_CAR` | `cars/rally.car` | car to select at startup |
@@ -32,7 +33,8 @@ cargo test --release                     # headless checks
 | `KORA_OPPONENTS` | campaign, else `3` | overrides the size of the grid |
 
 Controls: **arrows** or **WASD** to drive, **space** handbrake, **Esc** pause,
-and in the menus arrows move, **Enter** confirms and **Esc** goes back.
+**M** toggles the music, and in the menus arrows move, **Enter** confirms and
+**Esc** goes back.
 
 ## What is implemented
 
@@ -76,6 +78,14 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
   spinning at the ten degrees a second the MIDlet's own preview uses, with the
   four stat bars beside it.  Display only: nothing is for sale.  All eight cars
   are built once at startup.
+* **Sound** (`music`) - the game ships one sound, `sounds/theme.mid`, a
+  16-track General MIDI file of 1273 notes over about 84 seconds.  macroquad
+  plays WAV, OGG and MP3 but not MIDI, so the port reads the file and renders
+  it itself: parse the tracks, mix a simple voice per part, encode a WAV in
+  memory and hand that to macroquad, looped.  It is a rendition rather than the
+  original handset's audio - a General MIDI file names the instrument, not the
+  sound - but the notes, tempo and arrangement are the file's own.  `M` toggles
+  it and the pause menu shows which way it is.
 * **Sky** (`sky`) - the `.bck` backgrounds.  A track's theme byte picks one of
   the five (`al.a` lists them clear, rain, snow, desert and sunset, and
   `al.q(j)` is called with the theme while the race is set up), and the file
@@ -119,6 +129,7 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
 ```
 fonts/           Contrail One + its OFL licence (bundled via include_bytes)
 labels.tsv       every string the interface draws, with its provenance
+src/music.rs     MIDI to WAV, for the theme
 src/pack.rs      resource archive reader
 src/progress.rs  points, best times, car list and the save file
 src/labels.rs    UI text, loaded from labels.tsv
@@ -196,6 +207,14 @@ them are never read by this build.  So the mapping from those four values to
 engine, damping, steering, friction and brakes is the port's, chosen so the
 first car in `ba.a`'s list lands on the constants the port was calibrated with;
 `physics::Tuning` documents it.
+
+## Audio and macroquad's features
+
+macroquad 0.4 has `default = []`, so the sound system is behind a feature:
+without `features = ["audio"]` the audio module is a stub whose
+`load_sound_from_bytes` succeeds and plays nothing.  This crate enables it, and
+on Linux that pulls in `quad-alsa-sys`, so building needs the ALSA headers.  It
+is worth knowing before blaming your own code for the silence.
 
 ## Labels
 
@@ -299,8 +318,9 @@ as-is.
   race an entry threshold and an award but not the finish condition, and the
   MIDlet's own test is a method this port has not read apart.  A podium finish
   is the port's stand-in;
-* audio (the referenced `.amr` clips are not shipped in the pack at all) and
-  the Bluetooth/Vserv/SMS code paths;
+* the sound effects: every `.amr` clip the MIDlet references is missing from
+  the pack, so only the theme exists to play;
+* the Bluetooth/Vserv/SMS code paths;
 
 * class `ai`'s per-object orientation matrices are simplified to a yaw for
   high-detail scenery;

@@ -12,6 +12,7 @@
 
 use std::path::PathBuf;
 
+use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, PlaySoundParams, Sound};
 use macroquad::models::{draw_mesh, Mesh};
 use macroquad::prelude::*;
 
@@ -23,7 +24,11 @@ use kora::physics::{CarControl, Tuning, World};
 use kora::progress::{self, Progress};
 use kora::race::Race;
 use kora::text;
-use kora::{format, hud, pack, scene, sky};
+use kora::{format, hud, music, pack, scene, sky};
+
+/// Background music level.  The MIDlet has its own SOUND and VOLUME settings;
+/// this is the port's default.
+const MUSIC_VOLUME: f32 = 0.35;
 
 fn assets_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("KORA_ASSETS") {
@@ -447,6 +452,41 @@ async fn main() {
         quick.len()
     );
 
+    // The one sound the game ships is a MIDI file at the JAR root, not in the
+    // resource pack, so `setup.sh` puts it beside the pack.  macroquad cannot
+    // play MIDI, so it is rendered here and handed over as a WAV.
+    let music_enabled = std::env::var("KORA_MUSIC").map(|v| v != "0").unwrap_or(true);
+    let theme = std::fs::read(dir.join("sounds/theme.mid")).ok();
+    let now = || std::time::Instant::now();
+    let started = now();
+    let track: Option<Sound> = match theme.as_deref().map(music::render) {
+        Some(Some(wav)) => {
+            println!(
+                "  theme rendered to {:.1} s of audio in {:?}",
+                wav.len() as f32 / (music::SAMPLE_RATE as f32 * 2.0),
+                started.elapsed()
+            );
+            load_sound_from_bytes(&wav).await.ok()
+        }
+        _ => {
+            eprintln!("  no sounds/theme.mid beside the pack, running silent");
+            None
+        }
+    };
+    let mut music_playing = false;
+    if music_enabled {
+        if let Some(track) = &track {
+            play_sound(
+                track,
+                PlaySoundParams {
+                    looped: true,
+                    volume: MUSIC_VOLUME,
+                },
+            );
+            music_playing = true;
+        }
+    }
+
     let save_path = PathBuf::from(
         std::env::var("KORA_SAVE").unwrap_or_else(|_| "kora-save.txt".to_string()),
     );
@@ -487,6 +527,26 @@ async fn main() {
     loop {
         let dt = get_frame_time().min(0.05);
         clear_background(menu::BACKDROP);
+
+        if let Some(track) = &track {
+            if is_key_pressed(KeyCode::M) {
+                music_playing = !music_playing;
+                if music_playing {
+                    play_sound(
+                        track,
+                        PlaySoundParams {
+                            looped: true,
+                            volume: MUSIC_VOLUME,
+                        },
+                    );
+                } else {
+                    macroquad::audio::stop_sound(track);
+                }
+            }
+            if !music_playing {
+                set_sound_volume(track, 0.0);
+            }
+        }
 
         match screen {
             Screen::Main => {
@@ -634,7 +694,7 @@ async fn main() {
 
             Screen::Paused => {
                 clear_background(menu::BACKDROP);
-                menu::draw_pause(cursor);
+                menu::draw_pause(cursor, track.as_ref().map(|_| music_playing));
                 if is_key_pressed(KeyCode::Up) {
                     cursor = (cursor + 2) % 3;
                 }

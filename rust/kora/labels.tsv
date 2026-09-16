@@ -39,6 +39,8 @@ pause_title	PAUSED	-
 pause_resume	RESUME	1
 pause_restart	RESTART	48
 pause_quit	QUIT TO MENU	159
+music_on	M: MUSIC ON	197
+music_off	M: MUSIC OFF	197
 mode_circuit	CIRCUIT	202
 mode_race	RACE	203
 mode_time_chase	TIME CHASE	204

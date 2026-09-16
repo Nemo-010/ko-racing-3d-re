@@ -21,6 +21,7 @@
 /rust/kora/assets/data
 /rust/kora/assets/data.*
 /rust/kora/assets/lists/
+/rust/kora/assets/sounds/
 
 # Uploaded attachments, unpacked into the tree proper.
 /attachments/

@@ -1392,3 +1392,56 @@ fn the_minimap_maps_the_track_the_right_way_up() {
     assert!(b.x > a.x && (b.y - a.y).abs() < 0.01);
     assert!(c.y > a.y && (c.x - a.x).abs() < 0.01);
 }
+
+/// The soundtrack is rendered from the game's own MIDI, so the render can be
+/// checked against what the file says it holds: 1273 notes over about 84
+/// seconds, turned into a WAV of the right length that is not silence.
+#[test]
+fn the_theme_renders_from_the_games_midi() {
+    use kora::music;
+    let path = assets().join("sounds/theme.mid");
+    let Ok(midi) = std::fs::read(&path) else {
+        eprintln!("skipping: {} is not there (run ./setup.sh)", path.display());
+        return;
+    };
+
+    // Counted independently from the file with a separate parser.
+    assert_eq!(music::note_count(&midi), 1273, "notes in the theme");
+    let length = music::duration(&midi).expect("the theme has a length");
+    assert!(
+        (80.0..90.0).contains(&length),
+        "the theme runs for {length:.1} s, expected about 84"
+    );
+
+    let wav = music::render(&midi).expect("the theme should render");
+    assert_eq!(&wav[0..4], b"RIFF");
+    assert_eq!(&wav[8..12], b"WAVE");
+    assert_eq!(&wav[12..16], b"fmt ");
+    assert_eq!(&wav[36..40], b"data");
+
+    // A mono 16-bit WAV of the parsed length, plus a little tail.
+    let bytes = u32::from_le_bytes([wav[40], wav[41], wav[42], wav[43]]) as usize;
+    assert_eq!(bytes, wav.len() - 44, "the data chunk length");
+    let rate = u32::from_le_bytes([wav[24], wav[25], wav[26], wav[27]]);
+    assert_eq!(rate, music::SAMPLE_RATE);
+    let seconds = bytes as f64 / (rate as f64 * 2.0);
+    assert!(
+        (length..length + 1.5).contains(&seconds),
+        "{seconds:.1} s of audio for a {length:.1} s piece"
+    );
+
+    // And it is not silence, nor a clipped mess.
+    let samples: Vec<i16> = wav[44..]
+        .chunks_exact(2)
+        .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+    let peak = samples.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0);
+    let loud = samples.iter().filter(|s| s.unsigned_abs() > 64).count();
+    assert!(peak > 8000, "the render is nearly silent: peak {peak}");
+    assert!(peak <= 32767, "the render clips");
+    assert!(
+        loud * 100 / samples.len() > 20,
+        "only {loud} of {} samples carry any signal",
+        samples.len()
+    );
+}

@@ -232,8 +232,9 @@ runs 19 headless checks, including building all 40 tracks, driving AI round
 four of them, a whole race run to the flag and scored, and the point and
 best-time rules.
 
-Not implemented: audio, the Bluetooth/Vserv/SMS code paths, drift scoring and
-the original's menu artwork.  See
+Not implemented: sound effects (every `.amr` clip is missing from the pack),
+the Bluetooth/Vserv/SMS code paths, drift scoring and the original's menu
+artwork.  See
 [`rust/kora/README.md`](rust/kora/README.md).
 
 ## Suggested next steps

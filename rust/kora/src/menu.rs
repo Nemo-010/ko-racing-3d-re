@@ -177,7 +177,7 @@ pub fn draw_cars(cars: &[CarInfo], progress: &Progress, cursor: usize) {
     text::draw_shadow(labels::get("keys_cars"), 24.0, screen_height() - 22.0, 15.0, LOCKED);
 }
 
-pub fn draw_pause(cursor: usize) {
+pub fn draw_pause(cursor: usize, music: Option<bool>) {
     let items = ["pause_resume", "pause_restart", "pause_quit"];
     let width = 260.0;
     let left = (screen_width() - width) / 2.0;
@@ -190,6 +190,14 @@ pub fn draw_pause(cursor: usize) {
             draw_rectangle(left - 6.0, y - 4.0, width + 12.0, 30.0, HIGHLIGHT);
         }
         text::draw_shadow(labels::get(item), left + 16.0, y, 24.0, WHITE);
+    }
+    if let Some(playing) = music {
+        centred(
+            labels::get(if playing { "music_on" } else { "music_off" }),
+            top + items.len() as f32 * 34.0 + 16.0,
+            18.0,
+            LOCKED,
+        );
     }
 }
 

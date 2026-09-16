@@ -33,9 +33,11 @@ echo "setup: extracting every resource into assets/"
 (cd "$ROOT/tools" && python3 -m kora unpack ../x ../assets)
 
 echo "setup: preparing the Rust port's asset directory"
-mkdir -p "$ROOT/rust/kora/assets/lists"
+mkdir -p "$ROOT/rust/kora/assets/lists" "$ROOT/rust/kora/assets/sounds"
 cp "$X"/data "$X"/data.* "$ROOT/rust/kora/assets/"
 cp "$X"/lists/* "$ROOT/rust/kora/assets/lists/"
+# The only sound in the game is a JAR resource, not a pack entry.
+cp "$X"/sounds/theme.mid "$ROOT/rust/kora/assets/sounds/"
 
 echo "setup: done"
 echo "  Python tools: python3 -m kora info x/"
