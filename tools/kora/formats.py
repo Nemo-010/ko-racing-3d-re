@@ -284,13 +284,34 @@ class Tile:
 class Collision:
     """Triangle soup used for height sampling (class ``a``).
 
-    Vertex components are bytes divided by 100; the reader would wrap values
-    above 2.0 by subtracting 2.56, but that can never trigger for a byte.
-    A vertex count of zero means the stream ends there, with no triangles.
+    The local frame is the cell's ``[0,1]^2`` square.  ``bm.a(float, float)``
+    rotates a sample point by the cell's ``.map`` argument before the mesh is
+    queried, and the third component is *negated* when the triangle is built,
+    so a point's world height is ``-z * 14`` (the same 14-unit scale the ``.tl``
+    heights use).
+
+    Vertex components are bytes divided by 100, and anything above 2.0 wraps to
+    ``value - 2.56``, which only ever fires on the top of the byte range.  A
+    vertex count of zero means the stream ends there, with no triangles.
     """
 
     vertices: List[Tuple[float, float, float]]
     triangles: List[Tuple[int, int, int]]
+
+    def height(self, local: Tuple[float, float], arg: int = 0) -> Optional[float]:
+        """World height at a cell-local point, or ``None`` outside the mesh."""
+        point = rotate_sample(local, arg)
+        for i0, i1, i2 in self.triangles:
+            (x0, y0, z0), (x1, y1, z1), (x2, y2, z2) = (
+                self.vertices[i0], self.vertices[i1], self.vertices[i2])
+            det = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+            if abs(det) < 1e-9:
+                continue
+            l0 = ((y1 - y2) * (point[0] - x2) + (x2 - x1) * (point[1] - y2)) / det
+            l1 = ((y2 - y0) * (point[0] - x2) + (x0 - x2) * (point[1] - y2)) / det
+            if l0 >= -1e-6 and l1 >= -1e-6 and l0 + l1 <= 1.0 + 1e-6:
+                return -(l0 * z0 + l1 * z1 + (1.0 - l0 - l1) * z2) * 14.0
+        return None
 
     @classmethod
     def parse(cls, reader: Reader) -> "Collision":
@@ -310,6 +331,27 @@ class Collision:
         for _ in range(reader.u8()):
             triangles.append((reader.u8(), reader.u8(), reader.u8()))
         return cls(vertices, triangles)
+
+
+def rotate_sample(point: Tuple[float, float], arg: int) -> Tuple[float, float]:
+    """``bm.a(float, float)``: rotate a cell-local point into the mesh frame."""
+    x, y = point
+    arg %= 4
+    if arg == 1:
+        return (y, 1.0 - x)
+    if arg == 2:
+        return (1.0 - x, 1.0 - y)
+    if arg == 3:
+        return (1.0 - y, x)
+    return (x, y)
+
+
+def tile_surface(tile: "Tile", local: Tuple[float, float], arg: int = 0) -> float:
+    """The MIDlet's height sampling for one cell: mesh height, else flat zero."""
+    if tile.collision is None or not tile.collision.vertices:
+        return 0.0
+    height = tile.collision.height(local, arg)
+    return 0.0 if height is None else height
 
 
 # --------------------------------------------------------------------------

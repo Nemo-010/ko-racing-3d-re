@@ -163,6 +163,51 @@ impl Model {
     }
 }
 
+/// Triangle soup a tile uses for height sampling (class `a`).
+///
+/// Vertices are three bytes each divided by 100; the game wraps anything above
+/// 2.0 by -2.56, which only ever fires for the top of the byte range.  The
+/// local frame is the same `[0,1]^2` square `bm.a(float, float)` rotates a
+/// sample point into, and the third component is *negated* when the triangle
+/// is built, so world height is `-z * TILE` (14).  A zero vertex count ends
+/// the stream with no triangle list at all.
+#[derive(Clone)]
+pub struct Collision {
+    pub vertices: Vec<[f32; 3]>,
+    pub triangles: Vec<[usize; 3]>,
+}
+
+impl Collision {
+    fn parse(r: &mut Reader) -> Collision {
+        let count = r.u8() as usize;
+        if count == 0 {
+            return Collision {
+                vertices: Vec::new(),
+                triangles: Vec::new(),
+            };
+        }
+        let mut vertices = Vec::with_capacity(count);
+        for _ in 0..count {
+            let mut v = [0.0f32; 3];
+            for component in v.iter_mut() {
+                let mut value = r.u8() as f32 / 100.0;
+                if value > 2.0 {
+                    value -= 2.56;
+                }
+                *component = value;
+            }
+            vertices.push(v);
+        }
+        let triangles = (0..r.u8() as usize)
+            .map(|_| [r.u8() as usize, r.u8() as usize, r.u8() as usize])
+            .collect();
+        Collision {
+            vertices,
+            triangles,
+        }
+    }
+}
+
 /// `.tl` - class `ar`.
 ///
 /// The two 4-byte flag blocks are read in this order: `solid`, then `open`.
@@ -177,6 +222,9 @@ pub struct Tile {
     pub variant: u8,
     pub solid: [bool; 4],
     pub open_sides: [bool; 4],
+    /// Height-sampling mesh; most tiles ship none, and the game then treats
+    /// the whole cell as flat at zero.
+    pub collision: Option<Collision>,
 }
 
 impl Tile {
@@ -213,12 +261,18 @@ impl Tile {
             solid
         };
         r.u8();
+        let collision = if r.remaining() > 0 {
+            Some(Collision::parse(&mut r))
+        } else {
+            None
+        };
         Some(Tile {
             name,
             texture,
             variant,
             solid,
             open_sides,
+            collision,
         })
     }
 }

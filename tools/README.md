@@ -164,6 +164,36 @@ When `value < 100` the height entry is `(value, 1000.0)`; otherwise the
 world height is `14 * (value - 100) / 100` (`14` is the tile edge length,
 `ar.c`). All 62 shipped `.tl` files parse with zero trailing bytes.
 
+### Collision mesh
+
+26 of the 57 tiles ship a collision mesh; the other 31 (including every plain
+road tile: `s.tl`, `c.tl`, `f.tl`) ship none, and the game then treats the whole
+cell as flat at height zero.  The mesh is a height function, not a surface to
+walk on:
+
+* Vertices are in the cell's `[0,1]^2` square.  `bm.a(float, float)` rotates a
+  sample point by the cell's `.map` argument before querying the mesh, so the
+  mesh is stored in a frame rotated by `-arg` relative to the cell.
+* The third component is **negated** when `a.java` builds each triangle, and
+  the mesh shares the tile's 14-unit scale, so a point's world height is
+  `-z * 14`.  The same 14 appears in the `.tl` `heights` list as
+  `14 * (value - 100) / 100`.
+* Where the mesh does not cover the point, the height is zero - which is why a
+  kerb tile like `bra1.tl` (a strip along `x` in `[0, 0.2]`) is mostly flat
+  road with a 0.7-unit gutter at one edge.
+
+Confirmed against the visual models: sampling the collision height and the
+model's top surface at the same cell-local point gives `model_z / collision_z`
+of about 14 for 21 of the 26 tiles (the rest have kerbs or walls above the
+surface, so their topmost triangle is not the road).  Comparing neighbouring
+cells' heights at their shared edge is what pins the rotation and rules out a
+scale of 7 or 1.
+
+The ranges are real: `h1.tl` and `h4.tl` ramp from 0 down to -4.2, `br1.tl` and
+`br2.tl` sit at -4.2, `vl.tl` is a platform raised to +0.7, and the `bra*` kerbs
+sit 0.7-1.4 below the road.  `python3 -m kora heights assets/ 1.map` prints the
+per-cell heights for a track.
+
 **The second flag block is the drivable-side flag, not walls.** Class `ar`
 keeps it in `b[]` and `bm.b(i)` returns `ar.b((i + arg) % 4)`; the `bs`
 flood that walks the track branches on exactly that call. Reading it as

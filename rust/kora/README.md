@@ -43,8 +43,11 @@ Controls: **arrows** or **WASD** to drive, **space** handbrake, **R** restart,
   through `lists/tile_list`, mid detail through `md_list` and high detail
   through `hd_list` + `ol`, applies each item's 0-3 rotation and bakes
   everything into one macroquad mesh per texture.  It also builds the physics
-  road: one flat quad per drivable cell plus a barrier wherever a side is not
-  drivable.
+  road from each tile's **collision mesh**: a sub-divided patch over every cell
+  whose tile carries one (26 of the 57 do, including the ramps that drop 4.2
+  units and the platform raised 0.7), a flat quad for the rest, and a barrier
+  standing on the surface wherever a side is not drivable.  `SurfaceGrid` keeps
+  the same height function for runtime queries.
 * **Road graph** (`grid`) - adjacency from the tile's drivable-side flags,
   rotated by the cell argument.  All 40 shipped maps come out connected, which
   is how the flag semantics were confirmed rather than guessed.  The graph
@@ -63,7 +66,10 @@ Controls: **arrows** or **WASD** to drive, **space** handbrake, **R** restart,
   a stuck detector that reverses out of a barrier.
 * **Vehicle** (`physics`) - one shared `PhysicsWorld` for the player and the
   opponents, each a dynamic chassis driven by rapier's
-  `DynamicRayCastVehicleController`, so they collide with each other.
+  `DynamicRayCastVehicleController`, so they collide with each other.  Cars are
+  lifted back onto the road surface when they sink below it (`World::lift_to`),
+  which is what the MIDlet does every frame and what lets a car cross the steps
+  between two tiles instead of being trapped by them.
 * **HUD** (`text`) - lap, position, total time, current and best lap, drawn
   with the game's own bitmap font (`/fonts/font` + `font.tab` + `font.png`).
 
@@ -106,6 +112,8 @@ macroquad context.
 | `campaign_tables_decode` | both career tables, every race record, all five mode layouts |
 | `campaign_lookup_picks_the_right_race` | the map -> race lookup, including quick-race maps with no entry |
 | `campaign_themes_still_build` | building a track in theme 3 produces the same collider |
+| `collision_meshes_give_tracks_elevation` | ramps and platforms reach the collider, and the collider matches the runtime height function |
+| `cars_climb_the_track_elevation` | AI cars drive down 1.map's 4.2-unit ramp and back out |
 
 ## Coordinate conventions
 
@@ -154,7 +162,6 @@ as-is.
   are decoded: the port reads a track's race setup but never saves progress;
 * audio (the referenced `.amr` clips are not shipped in the pack at all) and
   the Bluetooth/Vserv/SMS code paths;
-* track elevation: the collider is flat even where a tile's collision mesh
-  would describe a slope or a jump;
+
 * class `ai`'s per-object orientation matrices are simplified to a yaw for
   high-detail scenery.

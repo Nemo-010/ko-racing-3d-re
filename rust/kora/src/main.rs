@@ -222,6 +222,18 @@ async fn main() {
             races[index].update(now, &track.grid, world.position(index));
         }
 
+        // --- keep every car on the road surface ---------------------------
+        // The MIDlet sets its car's height from the track's collision mesh
+        // every frame, so it walks over the steps between tiles; a physics
+        // chassis would be stopped by them without this.
+        let ride = car.half_extents.y + 0.02;
+        for index in 0..world.cars.len() {
+            let position = world.position(index);
+            if let Some(height) = track.surface.height_at(position) {
+                world.lift_to(index, height + ride);
+            }
+        }
+
         // --- camera -------------------------------------------------------
         let forward = rotation * vec3(0.0, 0.0, -1.0);
         let up = vec3(0.0, 1.0, 0.0);

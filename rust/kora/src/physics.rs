@@ -178,6 +178,28 @@ impl World {
         body.set_angvel(Vector::ZERO, true);
     }
 
+    /// Lift a car back onto the road surface if it has sunk below it.
+    ///
+    /// The MIDlet drives its car kinematically: every frame it *sets* the
+    /// height from the track's collision mesh, so a step between two tiles is
+    /// something it climbs rather than a wall.  A physics chassis has no such
+    /// luxury, so once a step has been hit the car would be trapped against
+    /// it.  Raising the body to the surface (and dropping any downward
+    /// velocity) reproduces the original behaviour without giving up contact
+    /// for the wheels.  A car in the air is left alone, so jumps still work.
+    pub fn lift_to(&mut self, car: usize, height: f32) {
+        let body = &mut self.physics.bodies[self.cars[car].body];
+        let translation = body.translation();
+        if translation.y >= height {
+            return;
+        }
+        body.set_translation(Vector::new(translation.x, height, translation.z), true);
+        let velocity = body.linvel();
+        if velocity.y < 0.0 {
+            body.set_linvel(Vector::new(velocity.x, 0.0, velocity.z), true);
+        }
+    }
+
     /// Teleport a car onto the given point (used to rejoin after a fall).
     pub fn replace(&mut self, car: usize, position: Vec3, yaw: f32) {
         let body = &mut self.physics.bodies[self.cars[car].body];

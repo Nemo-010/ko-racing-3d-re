@@ -317,6 +317,7 @@ fn opponents_drive_the_track() {
 
     let scene::Track {
         grid,
+        surface,
         collision_vertices,
         collision_indices,
         walls,
@@ -357,6 +358,10 @@ fn opponents_drive_the_track() {
         }
         world.step(1.0 / 60.0, &controls);
         for index in 0..cars {
+            let place = world.position(index);
+            if let Some(height) = surface.height_at(place) {
+                world.lift_to(index, height + geometry.half_extents.y + 0.02);
+            }
             let place = world.position(index);
             assert!(place.y > -30.0, "car {index} fell off at step {step}");
             travelled[index] += (place - previous[index]).length();
@@ -406,6 +411,7 @@ fn opponents_survive_other_tracks() {
         let track = scene::build(&dir, &resources, map);
         let scene::Track {
             grid,
+            surface,
             collision_vertices,
             collision_indices,
             walls,
@@ -434,6 +440,10 @@ fn opponents_survive_other_tracks() {
             }
             world.step(1.0 / 60.0, &controls);
             for index in 0..cars {
+                let place = world.position(index);
+                if let Some(height) = surface.height_at(place) {
+                    world.lift_to(index, height + geometry.half_extents.y + 0.02);
+                }
                 let place = world.position(index);
                 assert!(
                     place.y > -20.0,
@@ -562,4 +572,121 @@ fn campaign_themes_still_build() {
             "{map}: theme 3 added geometry"
         );
     }
+}
+
+/// The collider has to come from each tile's collision mesh, so tracks with
+/// bridges and ramps stop being flat.
+#[test]
+fn collision_meshes_give_tracks_elevation() {
+    let dir = assets();
+    let resources = pack::load(&dir);
+
+    // 1.map uses h1.tl, a ramp whose collision mesh drops 4.2 units, and
+    // ma1.map uses vl.tl, a platform raised 0.7 above the road plane.
+    let hills = scene::build(&dir, &resources, "1.map");
+    let span = |track: &scene::Track| {
+        track
+            .collision_vertices
+            .iter()
+            .map(|v| v.y)
+            .fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)))
+    };
+    let (low, high) = span(&hills);
+    assert!(low <= -4.1, "1.map should drop to about -4.2, got {low:.2}");
+    assert!(high.abs() < 0.1, "1.map should not rise, got {high:.2}");
+
+    // Values straight from the collision meshes, cross-checked against the
+    // Python decoder: a ramp mid-point, a kerb, and a plain road tile.
+    let height = |x: i32, y: i32| hills.surface.height_at(hills.grid.center(x, y));
+    assert!((height(4, 7).unwrap() + 2.1).abs() < 0.01, "ramp midpoint");
+    assert!((height(2, 2).unwrap() + 0.70).abs() < 0.01, "kerb");
+    assert!(height(2, 6).unwrap().abs() < 0.01, "plain road tile is flat");
+    assert_eq!(height(0, 0), None, "off-track cells have no surface");
+
+    let raised = scene::build(&dir, &resources, "ma1.map");
+    let (_, top) = span(&raised);
+    assert!(top >= 0.6, "ma1.map should be raised, got {top:.2}");
+    assert!(raised.collision_vertices.iter().any(|v| v.y > 0.5));
+
+    // The collider must be the height function the runtime queries: every cell
+    // whose tile ships a mesh has a grid vertex at its centre, and that vertex
+    // has to sit at exactly the height `height_at` reports.
+    for map in ["1.map", "ma1.map", "sp3.map", "mc5.map"] {
+        let track = scene::build(&dir, &resources, map);
+        let mut checked = 0;
+        for (x, y) in track.grid.path() {
+            let centre = track.grid.center(x, y);
+            let Some(height) = track.surface.height_at(centre) else {
+                continue;
+            };
+            if height.abs() < 1e-6 {
+                continue;
+            }
+            let found = track.collision_vertices.iter().any(|v| {
+                (v.x - centre.x).abs() < 1e-3
+                    && (v.z - centre.z).abs() < 1e-3
+                    && (v.y - height).abs() < 1e-3
+            });
+            assert!(
+                found,
+                "{map}: cell ({x},{y}) is at {height:.2} but the collider has no vertex there"
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "{map}: no elevated cell was cross-checked");
+    }
+}
+
+/// Cars have to be able to drive the tracks now that they have elevation: the
+/// MIDlet lifts its car onto the surface, and the port has to do the same or a
+/// step between two tiles traps it.
+#[test]
+fn cars_climb_the_track_elevation() {
+    use kora::ai::AiDriver;
+    use kora::physics::{CarControl, World};
+    let dir = assets();
+    let resources = pack::load(&dir);
+    let car = format::Car::parse(&resources["cars/rally.car"]).unwrap();
+    let geometry = scene::build_car(&resources, &car).unwrap();
+
+    // 1.map has a 4.2-unit ramp; without the lift the cars end up stuck in it.
+    let track = scene::build(&dir, &resources, "1.map");
+    let scene::Track {
+        grid,
+        surface,
+        collision_vertices,
+        collision_indices,
+        walls,
+        ..
+    } = track;
+    let mut world = World::new(collision_vertices, collision_indices, &walls);
+    for &(spot, yaw) in grid.grid_slots(2).iter() {
+        world.add_car(spot, yaw, geometry.half_extents);
+    }
+    let cars = world.cars.len();
+    let ride = geometry.half_extents.y + 0.02;
+    let mut drivers: Vec<AiDriver> = (0..cars).map(|_| AiDriver::new(1.0)).collect();
+    let mut lowest = f32::MAX;
+
+    for _ in 0..(60 * 60) {
+        let mut controls = vec![CarControl::default(); cars];
+        for index in 0..cars {
+            let (position, rotation) = world.pose(index);
+            let heading = rotation * vec3(0.0, 0.0, -1.0);
+            controls[index] =
+                drivers[index].control(&grid, position, heading, world.speed(index), 1.0 / 60.0);
+        }
+        world.step(1.0 / 60.0, &controls);
+        for index in 0..cars {
+            let position = world.position(index);
+            if let Some(height) = surface.height_at(position) {
+                world.lift_to(index, height + ride);
+            }
+            lowest = lowest.min(world.position(index).y);
+        }
+    }
+    assert!(
+        lowest < -1.0,
+        "the cars never went down the ramp (lowest {lowest:.2})"
+    );
 }

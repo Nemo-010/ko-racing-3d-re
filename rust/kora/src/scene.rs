@@ -29,9 +29,36 @@ pub const TILE: f32 = 14.0;
 /// Static node scale the game applies to tile/detail/object models (`ar.a`).
 pub const WORLD_SCALE: f32 = 7.01;
 
+/// Per-cell collision meshes, so the runtime can ask how high the road is at
+/// any point and lift a car back onto it.
+pub struct SurfaceGrid {
+    width: i32,
+    height: i32,
+    cells: Vec<Option<(u8, Option<format::Collision>)>>,
+}
+
+impl SurfaceGrid {
+    pub fn height_at(&self, position: Vec3) -> Option<f32> {
+        let x = (position.x / TILE).round() as i32;
+        let y = (-position.z / TILE).round() as i32;
+        if x < 0 || y < 0 || x >= self.width || y >= self.height {
+            return None;
+        }
+        let (arg, collision) = self.cells[(y * self.width + x) as usize].as_ref()?;
+        let centre = vec3(x as f32 * TILE, 0.0, -(y as f32) * TILE);
+        let local = vec2(
+            (position.x - centre.x) / TILE + 0.5,
+            (centre.z - position.z) / TILE + 0.5,
+        );
+        Some(surface_height(collision.as_ref(), *arg, local))
+    }
+}
+
 pub struct Track {
     /// Road graph: which cells exist and which sides are drivable.
     pub grid: Grid,
+    /// The height function the collider was built from.
+    pub surface: SurfaceGrid,
     pub meshes: Vec<Mesh>,
     /// Texture resource for each mesh, parallel to `meshes`.
     pub texture_paths: Vec<String>,
@@ -58,6 +85,81 @@ impl Track {
             mesh.texture = cache.get(path).cloned();
         }
     }
+}
+
+/// Samples per cell edge when tessellating a cell whose surface is not flat.
+/// The collision mesh is a height function over the cell's local `[0,1]^2`
+/// square and most tiles only cover part of it, so the collider samples the
+/// function instead of emitting the raw triangles: a kerb strip, a sunken
+/// floor and a raised platform then all come out as one surface.
+const SURFACE_STEPS: usize = 8;
+
+/// `bm.a(float, float)`: the sample point is rotated into the mesh's frame.
+fn rotate_sample(point: Vec2, arg: u8) -> Vec2 {
+    match arg % 4 {
+        1 => vec2(point.y, 1.0 - point.x),
+        2 => vec2(1.0 - point.x, 1.0 - point.y),
+        3 => vec2(1.0 - point.y, point.x),
+        _ => point,
+    }
+}
+
+/// The game's height function: the interpolated collision mesh height in world
+/// units, or zero when the tile has no mesh or the point falls outside it.
+fn surface_height(collision: Option<&format::Collision>, arg: u8, local: Vec2) -> f32 {
+    let Some(collision) = collision else {
+        return 0.0;
+    };
+    if collision.vertices.is_empty() {
+        return 0.0;
+    }
+    let point = rotate_sample(local, arg);
+    for triangle in &collision.triangles {
+        let [a, b, c] = [
+            collision.vertices[triangle[0]],
+            collision.vertices[triangle[1]],
+            collision.vertices[triangle[2]],
+        ];
+        let determinant = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+        if determinant.abs() < 1e-9 {
+            continue;
+        }
+        let u = ((b[1] - c[1]) * (point.x - c[0]) + (c[0] - b[0]) * (point.y - c[1])) / determinant;
+        let v = ((c[1] - a[1]) * (point.x - c[0]) + (a[0] - c[0]) * (point.y - c[1])) / determinant;
+        if u >= -1e-6 && v >= -1e-6 && u + v <= 1.0 + 1e-6 {
+            // The third component is negated when the MIDlet builds the
+            // triangle, and the mesh shares the tile's 14-unit scale.
+            return -(u * a[2] + v * b[2] + (1.0 - u - v) * c[2]) * TILE;
+        }
+    }
+    0.0
+}
+
+fn tile_has_mesh(tile: Option<&format::Tile>) -> bool {
+    tile.and_then(|tile| tile.collision.as_ref())
+        .is_some_and(|collision| !collision.vertices.is_empty())
+}
+
+fn world_of(centre: Vec3, local: Vec2, height: f32) -> Vec3 {
+    vec3(
+        centre.x + (local.x - 0.5) * TILE,
+        height,
+        centre.z - (local.y - 0.5) * TILE,
+    )
+}
+
+fn push_triangle(
+    vertices: &mut Vec<RVector>,
+    indices: &mut Vec<[u32; 3]>,
+    a: Vec3,
+    b: Vec3,
+    c: Vec3,
+) {
+    let base = vertices.len() as u32;
+    for point in [a, b, c] {
+        vertices.push(RVector::new(point.x, point.y, point.z));
+    }
+    indices.push([base, base + 1, base + 2]);
 }
 
 struct Part {
@@ -344,41 +446,98 @@ pub fn build_themed(dir: &Path, res: &Resources, map_name: &str, theme: u8) -> T
 
     let Builder { batches, .. } = builder;
 
-    // Physics ground.  The MIDlet samples the tile's collision mesh for height
-    // and falls back to a flat plane at zero when a tile has none - which is
-    // the case for most of them (`s.tl` and friends ship no collision data).
-    // Baking the *visual* triangles instead leaves gaps between cell corners
-    // that cars drop through, so the collider is one flat quad per road cell
-    // plus a barrier wherever a side is not drivable.
+    // Physics ground.  The MIDlet samples each tile's collision mesh for
+    // height and falls back to a flat plane at zero when the tile has none -
+    // which is most of them (`s.tl` and friends ship no collision data).
+    //
+    // The collider is that height function: a sub-divided patch over every
+    // cell whose tile carries a mesh, a flat quad otherwise.  A mesh can cover
+    // only part of its cell, so sampling it on a grid gives one surface rather
+    // than overlapping sheets.  Steps between neighbouring cells are left as
+    // they are and the car is lifted onto the surface (see `World::lift_to`),
+    // which is how the MIDlet drives its own car over them.
     let mut collision_vertices: Vec<RVector> = Vec::new();
     let mut collision_indices: Vec<[u32; 3]> = Vec::new();
     let mut walls: Vec<(Vec3, Vec3)> = Vec::new();
     let half_tile = TILE * 0.5;
+
+    let tile_at = |x: i32, y: i32| -> Option<(u8, u8)> {
+        if !grid.occupied(x, y) {
+            return None;
+        }
+        map.cells[y as usize][x as usize].tile
+    };
+    let mesh_of = |kind: u8| -> Option<&format::Collision> {
+        tiles
+            .get(&kind)
+            .and_then(|tile| tile.collision.as_ref())
+            .filter(|collision| !collision.vertices.is_empty())
+    };
+
     for (x, y) in grid.path() {
         let centre = grid.center(x, y);
-        let base = collision_vertices.len() as u32;
-        for (dx, dz) in [
-            (-half_tile, -half_tile),
-            (-half_tile, half_tile),
-            (half_tile, half_tile),
-            (half_tile, -half_tile),
-        ] {
-            collision_vertices.push(RVector::new(centre.x + dx, centre.y, centre.z + dz));
-        }
-        collision_indices.push([base, base + 1, base + 2]);
-        collision_indices.push([base, base + 2, base + 3]);
+        let (kind, arg) = tile_at(x, y).unwrap();
+        let mesh = mesh_of(kind);
 
+        if mesh.is_none() {
+            let base = collision_vertices.len() as u32;
+            for (dx, dz) in [
+                (-half_tile, -half_tile),
+                (-half_tile, half_tile),
+                (half_tile, half_tile),
+                (half_tile, -half_tile),
+            ] {
+                collision_vertices.push(RVector::new(centre.x + dx, 0.0, centre.z + dz));
+            }
+            collision_indices.push([base, base + 1, base + 2]);
+            collision_indices.push([base, base + 2, base + 3]);
+        } else {
+            let steps = SURFACE_STEPS;
+            for i in 0..steps {
+                for j in 0..steps {
+                    let lo = vec2(i as f32, j as f32) / steps as f32;
+                    let hi = vec2((i + 1) as f32, (j + 1) as f32) / steps as f32;
+                    let corner = |local: Vec2| {
+                        world_of(centre, local, surface_height(mesh, arg, local))
+                    };
+                    let (a, b, c, d) = (
+                        corner(vec2(lo.x, lo.y)),
+                        corner(vec2(lo.x, hi.y)),
+                        corner(vec2(hi.x, hi.y)),
+                        corner(vec2(hi.x, lo.y)),
+                    );
+                    push_triangle(&mut collision_vertices, &mut collision_indices, a, b, c);
+                    push_triangle(&mut collision_vertices, &mut collision_indices, a, c, d);
+                }
+            }
+        }
+
+        // A barrier on every side that is not drivable, standing on the
+        // surface rather than at zero.
         for dir in 0..4 {
             if grid.open_sides(x, y) & (1 << dir) != 0 {
                 continue;
             }
+            let ground = surface_height(
+                mesh,
+                arg,
+                match dir {
+                    0 => vec2(1.0, 0.5),
+                    1 => vec2(0.5, 0.0),
+                    2 => vec2(0.0, 0.5),
+                    _ => vec2(0.5, 1.0),
+                },
+            );
             let direction = crate::grid::dir_mq(dir);
             let (hx, hz) = if dir % 2 == 0 {
                 (0.6, half_tile)
             } else {
                 (half_tile, 0.6)
             };
-            walls.push((centre + direction * half_tile, vec3(hx, 1.1, hz)));
+            walls.push((
+                centre + direction * half_tile + vec3(0.0, ground, 0.0),
+                vec3(hx, 1.1, hz),
+            ));
         }
     }
 
@@ -398,8 +557,28 @@ pub fn build_themed(dir: &Path, res: &Resources, map_name: &str, theme: u8) -> T
         }
     }
 
+    let surface = SurfaceGrid {
+        width: grid.width,
+        height: grid.height,
+        cells: (0..grid.height)
+            .flat_map(|y| (0..grid.width).map(move |x| (x, y)))
+            .map(|(x, y)| {
+                map.cells[y as usize][x as usize].tile.map(|(kind, arg)| {
+                    (
+                        arg,
+                        tiles
+                            .get(&kind)
+                            .and_then(|tile| tile.collision.clone())
+                            .filter(|collision| !collision.vertices.is_empty()),
+                    )
+                })
+            })
+            .collect(),
+    };
+
     Track {
         grid,
+        surface,
         meshes,
         texture_paths,
         collision_vertices,

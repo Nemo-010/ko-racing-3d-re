@@ -133,7 +133,10 @@ Full byte tables are in [`tools/README.md`](tools/README.md). Summary:
   the cell argument), which is what makes the tracks connected: using it, all
   40 maps form a single connected road graph; using the first block instead,
   28 of them fall apart into fragments.  Most tiles ship no collision mesh,
-  which is why the MIDlet's height sampling falls back to a flat plane.
+  which is why the MIDlet's height sampling falls back to a flat plane.  The
+  26 tiles that *do* ship a mesh are a height function over the cell's local
+  `[0,1]^2` square, rotated by the cell argument and negated times 14 - ramps
+  that drop 4.2 units, a platform raised 0.7, and kerbs 0.7-1.4 below the road.
 * **`.ob`** — model + texture + flag.
 * **`.bck`** — texture + 4 RGB colours + detail byte + two fog scales.
 * **`.md` / `.hd`** — mid/high-detail decoration layers.
@@ -225,9 +228,7 @@ Bluetooth/Vserv/SMS code paths.  See
 
 ## Suggested next steps
 
-1. Track elevation: build the collider from each tile's collision mesh where
-   one exists, so bridges and jumps stop being flat.
-2. Menus and car selection, then the career loop over `campaign.000`:
+1. Menus and car selection, then the career loop over `campaign.000`:
    progression, medals and unlock thresholds (all already decoded).
 4. Repack support: the pack format is simple enough to write, enabling
    asset swaps or a JAR rebuild.

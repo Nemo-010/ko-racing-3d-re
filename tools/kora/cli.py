@@ -188,6 +188,48 @@ def cmd_campaign(args) -> int:
     return 0
 
 
+def cmd_heights(args) -> int:
+    """Per-cell road height, sampled from each tile's collision mesh."""
+    import os
+
+    from . import formats as fmt
+
+    root = args.resources
+    lists = args.lists or os.path.join(os.path.dirname(os.path.abspath(root.rstrip("/"))), "x", "lists")
+    with open(os.path.join(lists, "tile_list"), "rb") as handle:
+        tile_names = [n for n in handle.read().decode("latin1").replace("\r", "").split("\n") if n]
+
+    cache = {}
+
+    def tile(kind):
+        if kind not in cache:
+            with open(os.path.join(root, "tiles", tile_names[kind - 1]), "rb") as handle:
+                cache[kind] = fmt.Tile.parse(handle.read())
+        return cache[kind]
+
+    if args.map:
+        maps = [args.map]
+    else:
+        maps = sorted(n for n in os.listdir(os.path.join(root, "levels")) if n.endswith(".map"))
+
+    for name in maps:
+        with open(os.path.join(root, "levels", name), "rb") as handle:
+            road = fmt.Map.parse(handle.read())
+        print("%s  %dx%d" % (name, road.width, road.height))
+        for cy in range(road.height):
+            row = []
+            for cx in range(road.width):
+                cell = road.cells[cy][cx]
+                if not cell.tile:
+                    row.append("   .  ")
+                    continue
+                kind, arg = cell.tile
+                row.append("%6.2f" % fmt.tile_surface(tile(kind), (0.5, 0.5), arg))
+            print("  " + " ".join(row))
+        print()
+    return 0
+
+
 def cmd_font(args) -> int:
     font, aw, ah, _atlas = fontimg.load_font(args.path)
     print("glyphs:      %d" % font.glyph_count)
@@ -247,6 +289,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path")
     p.add_argument("--tsv", action="store_true", help="emit tab-separated rows")
     p.set_defaults(func=cmd_campaign)
+
+    p = sub.add_parser("heights", help="road height per cell, from tile collision meshes")
+    p.add_argument("resources", help="unpacked resource directory (the one holding tiles/ and levels/)")
+    p.add_argument("map", nargs="?", help="one levels/*.map name; omit for all")
+    p.add_argument("--lists", help="directory holding lists/tile_list (default: ../x/lists)")
+    p.set_defaults(func=cmd_heights)
 
     p = sub.add_parser("font", help="inspect a bitmap font (base + .tab + .png)")
     p.add_argument("path", help="font base file, e.g. assets/fonts/font")
