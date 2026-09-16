@@ -126,41 +126,44 @@ pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, tit
     text::draw_shadow(labels::get("keys_events"), 32.0, screen_height() - 20.0, 15.0, LOCKED);
 }
 
-/// The four stat bars `ba.a(car, stat)` feeds the setup screen.
+/// The car list, with the four stat bars `ba.a(car, stat)` feeds the setup
+/// screen.  The right half of the screen is left clear for the showroom, which
+/// `main` draws behind this.
 ///
-/// The MIDlet draws these as bars beside the car's name when you pick one,
-/// which is all the numbers are for: there is no garage and nothing to buy.
+/// The bars are the only thing the four values are for: there is no garage and
+/// nothing to buy, and the original's own `co` class is not a showroom either -
+/// it never loads a car.
 pub fn draw_cars(cars: &[CarInfo], progress: &Progress, cursor: usize) {
-    centred(labels::get("menu_cars"), 12.0, 32.0, WHITE);
+    centred(labels::get("menu_cars"), 12.0, 30.0, WHITE);
 
-    let row = 62.0;
-    let top = 82.0;
+    let row = 58.0;
+    let top = 74.0;
     for (index, car) in cars.iter().enumerate() {
         let y = top + index as f32 * row;
-        if index == cursor {
-            draw_rectangle(24.0, y - 8.0, screen_width() - 48.0, row - 10.0, HIGHLIGHT);
-        }
         let active = index == progress.car;
+        if index == cursor {
+            draw_rectangle(16.0, y - 6.0, screen_width() * 0.44, row - 8.0, HIGHLIGHT);
+        }
         text::draw_shadow(
             &car.name,
-            32.0,
+            24.0,
             y,
-            23.0,
+            21.0,
             if active { ACCENT } else { WHITE },
         );
         if active {
-            text::draw_shadow(labels::get("in_use"), 250.0, y + 4.0, 14.0, ACCENT);
+            text::draw_shadow(labels::get("in_use"), 214.0, y + 5.0, 13.0, ACCENT);
         }
         for (stat, value) in car.stats.iter().enumerate() {
-            let by = y + 22.0 + stat as f32 * 9.0;
-            text::draw_shadow(labels::stat_name(stat), 330.0, by, 12.0, LOCKED);
+            let by = y + 20.0 + stat as f32 * 9.0;
+            text::draw_shadow(labels::stat_name(stat), 24.0, by, 11.0, LOCKED);
             for segment in 0..6u8 {
-                let x = 420.0 + segment as f32 * 13.0;
+                let x = 130.0 + segment as f32 * 11.0;
                 draw_rectangle(
                     x,
                     by + 1.0,
                     9.0,
-                    7.0,
+                    6.0,
                     if segment < *value {
                         Color::new(0.75, 0.80, 0.88, 1.0)
                     } else {
@@ -171,7 +174,7 @@ pub fn draw_cars(cars: &[CarInfo], progress: &Progress, cursor: usize) {
         }
     }
 
-    text::draw_shadow(labels::get("keys_cars"), 32.0, screen_height() - 22.0, 15.0, LOCKED);
+    text::draw_shadow(labels::get("keys_cars"), 24.0, screen_height() - 22.0, 15.0, LOCKED);
 }
 
 pub fn draw_pause(cursor: usize) {

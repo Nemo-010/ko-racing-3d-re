@@ -1267,3 +1267,41 @@ fn bonus_races_unlock_rather_than_award() {
     assert_eq!(again.gained, 0, "passing the same race twice pays once");
     assert!(again.improved, "though the quicker run is kept");
 }
+
+/// The showroom loads every car up front, so all eight have to build, and each
+/// has to be centred on its own origin or the turntable would spin it off the
+/// edge of the view.
+#[test]
+fn every_car_builds_for_the_showroom() {
+    use kora::progress;
+    let resources = pack::load(&assets());
+    let cars = progress::car_infos(&resources);
+    assert_eq!(cars.len(), 8, "ba.a lists eight");
+
+    for car in &cars {
+        let definition = format::Car::parse(&resources[&format!("cars/{}", car.file)])
+            .unwrap_or_else(|| panic!("{} did not read", car.name));
+        let geometry = scene::build_car(&resources, &definition)
+            .unwrap_or_else(|| panic!("{} did not build", car.name));
+        assert!(!geometry.vertices.is_empty(), "{} is empty", car.name);
+        assert_eq!(geometry.indices.len() % 3, 0);
+        assert!(
+            geometry.half_extents.min_element() > 0.05,
+            "{} is flat, so it would be invisible on the turntable",
+            car.name
+        );
+
+        // Centred on its own origin: the camera looks at (0, 0.15, 0).
+        let low = geometry
+            .vertices
+            .iter()
+            .map(|v| v.position.y)
+            .fold(f32::MAX, f32::min);
+        let high = geometry
+            .vertices
+            .iter()
+            .map(|v| v.position.y)
+            .fold(f32::MIN, f32::max);
+        assert!(low < -0.05 && high > 0.05, "{} is not centred: {low}..{high}", car.name);
+    }
+}

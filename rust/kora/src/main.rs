@@ -23,7 +23,7 @@ use kora::physics::{CarControl, Tuning, World};
 use kora::progress::{self, Progress};
 use kora::race::Race;
 use kora::text;
-use kora::{pack, scene};
+use kora::{format, pack, scene};
 
 fn assets_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("KORA_ASSETS") {
@@ -348,6 +348,39 @@ impl Running {
     }
 }
 
+/// Render one car on a turntable in the right half of the screen.
+///
+/// The camera orbits a car centred on its own origin, and the viewport keeps it
+/// off the list.  `Camera3D` works its aspect out from the whole window, so a
+/// half-width viewport has to be told its own.
+fn draw_showroom(geometry: &scene::CarGeometry, texture: &Option<Texture2D>, degrees: f32) {
+    let (left, top) = (screen_width() * 0.46, 40.0);
+    let width = screen_width() - left - 16.0;
+    let height = screen_height() - top - 60.0;
+    if width < 32.0 || height < 32.0 {
+        return;
+    }
+
+    let angle = degrees.to_radians();
+    let distance = 2.6;
+    let mut camera = Camera3D::default();
+    camera.position = vec3(distance * angle.sin(), 1.35, distance * angle.cos());
+    camera.target = vec3(0.0, 0.15, 0.0);
+    camera.up = vec3(0.0, 1.0, 0.0);
+    camera.fovy = 45f32.to_radians();
+    camera.aspect = Some(width / height);
+    camera.viewport = Some((left as i32, top as i32, width as i32, height as i32));
+    camera.z_far = 60.0;
+    set_camera(&camera);
+
+    draw_mesh(&Mesh {
+        vertices: geometry.vertices.clone(),
+        indices: geometry.indices.clone(),
+        texture: texture.clone(),
+    });
+    set_default_camera();
+}
+
 #[macroquad::main("K.O. Racing 3D - Rust port")]
 async fn main() {
     let dir = assets_dir();
@@ -372,6 +405,20 @@ async fn main() {
         .cloned()
         .collect();
     let quick = campaign::quick_events(&resources);
+    // The showroom draws the picked car in 3D, the way `u.j()` renders
+    // `bd.a.a(car, angle)` through a transform while the panel spins at ten
+    // degrees a second.  Display only: nothing here can be bought.
+    let showroom: Vec<(scene::CarGeometry, Option<Texture2D>)> = cars
+        .iter()
+        .filter_map(|car| {
+            let definition =
+                format::Car::parse(resources.get(&format!("cars/{}", car.file))?)?;
+            let geometry = scene::build_car(&resources, &definition)?;
+            let texture = scene::load_car_texture(&resources, &geometry);
+            Some((geometry, texture))
+        })
+        .collect();
+    println!("  {} cars in the showroom", showroom.len());
     println!(
         "  {} cars, {} career events, {} deluxe events, {} quick-race tracks",
         cars.len(),
@@ -394,6 +441,7 @@ async fn main() {
     // shell and keeps the environment overrides meaningful.
     let mut screen = Screen::Main;
     let mut cursor = 0usize;
+    let mut showroom_spin = 0.0f32;
     let mut running: Option<Running> = None;
     let mut message = String::new();
 
@@ -506,6 +554,12 @@ async fn main() {
                     screen = Screen::Main;
                 } else {
                     cursor = cursor.min(cars.len() - 1);
+                    // Spin at the game's own rate: `u.b(float)` advances its
+                    // angle by ten degrees a second and wraps at 360.
+                    showroom_spin = (showroom_spin + 10.0 * dt) % 360.0;
+                    if let Some((geometry, texture)) = showroom.get(cursor) {
+                        draw_showroom(geometry, texture, showroom_spin);
+                    }
                     menu::draw_cars(&cars, &progress, cursor);
                     if is_key_pressed(KeyCode::Up) {
                         cursor = cursor.saturating_sub(1);

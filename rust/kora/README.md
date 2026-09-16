@@ -72,9 +72,13 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
   lifted back onto the road surface when they sink below it (`World::lift_to`),
   which is what the MIDlet does every frame and what lets a car cross the steps
   between two tiles instead of being trapped by them.
+* **Showroom** - the car screen draws the highlighted car on a turntable,
+  spinning at the ten degrees a second the MIDlet's own preview uses, with the
+  four stat bars beside it.  Display only: nothing is for sale.  All eight cars
+  are built once at startup.
 * **Menus** (`menu`) - main menu, the career event list, the deluxe list, a
-  quick-race list of all 40 tracks, car selection with each car's four stat
-  bars, a pause menu and a results panel.  Locked events grey out and show the
+  quick-race list of all 40 tracks, the car screen and its showroom, a pause
+  menu and a results panel.  Locked events grey out and show the
   points they need, each event carries its stored best time, and each shows the
   game's own name for its mode (CIRCUIT, RACE, TIME CHASE, SURVIVAL, HEAD TO
   HEAD, SLIDESHOW, SPECIAL).

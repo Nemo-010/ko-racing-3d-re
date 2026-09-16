@@ -221,8 +221,8 @@ platforms are real; a rapier raycast vehicle for the player plus AI opponents
 that follow the road; lap, checkpoint and timing rules; and menus - main menu,
 career event list, quick race, car selection with stat bars, pause and results
 - with the deluxe campaign's 13 extra levels opened by points rather than by the
-original's SMS purchase, career points and per-race best times, and no garage
-or medals, because the original has none.  No paywall and no network code of
+original's SMS purchase, career points and per-race best times, a display-only
+showroom, and no garage or medals, because the original has none.  No paywall and no network code of
 any kind.  On-screen text is set in
 Contrail One (SIL Open Font License, bundled in `rust/kora/fonts/`) and
 rasterised by macroquad, rather than the pack's bitmap fonts, which the tooling
