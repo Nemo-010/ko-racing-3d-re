@@ -60,6 +60,35 @@ pub fn tile_atlas(theme: u8, texture: &str) -> String {
     format!("tex/{swapped}")
 }
 
+/// A deliberate handle on the tile atlas's texture coordinates.
+///
+/// The coordinates this port computes are the game's own, byte for byte, and
+/// the whole-track renders say they land where they should.  Against a
+/// rendering of the original they still look a little off, and there is no way
+/// left to argue about that from inside the data, so this makes it testable by
+/// eye instead: `KORA_UV_SCALE` multiplies the atlas's coordinates about the
+/// centre and `KORA_UV_OFFSET="du,dv"` shifts them, both in texture units.
+/// Neither touches the geometry, so a tile's shape cannot change - only which
+/// part of the atlas paints it.  Unset, everything is untouched.
+pub fn atlas_uv(uv: Vec2) -> Vec2 {
+    let mut out = uv;
+    if let Ok(scale) = std::env::var("KORA_UV_SCALE") {
+        if let Ok(scale) = scale.parse::<f32>() {
+            out = (out - vec2(0.5, 0.5)) * scale + vec2(0.5, 0.5);
+        }
+    }
+    if let Ok(offset) = std::env::var("KORA_UV_OFFSET") {
+        let parts: Vec<f32> = offset
+            .split(',')
+            .filter_map(|part| part.trim().parse::<f32>().ok())
+            .collect();
+        if parts.len() == 2 {
+            out += vec2(parts[0], parts[1]);
+        }
+    }
+    out
+}
+
 /// One of the game's vertices, in macroquad's Y-up world.
 ///
 /// The game's models have **Z pointing down** - see the module comment - so the
@@ -408,6 +437,12 @@ impl<'a> Builder<'a> {
         let Some(model) = parse_model(self.res, model_path) else {
             return;
         };
+        // Only the shared tile atlas is adjustable: everything else already
+        // matches the artwork it names.
+        let is_atlas = texture_path.ends_with("texpack.png")
+            || texture_path.ends_with("ts.png")
+            || texture_path.ends_with("td.png")
+            || texture_path.ends_with("tf.png");
 
         let bounds = self
             .uv_bounds
@@ -437,7 +472,11 @@ impl<'a> Builder<'a> {
                 let rx = gx * cos - gy * sin;
                 let ry = gx * sin + gy * cos;
                 points[k] = game_to_world(rx + origin[0], ry + origin[1], gz + origin[2]);
-                uv[k] = vec2(model.texcoords[i][0], model.texcoords[i][1]);
+                uv[k] = if is_atlas {
+                    atlas_uv(vec2(model.texcoords[i][0], model.texcoords[i][1]))
+                } else {
+                    vec2(model.texcoords[i][0], model.texcoords[i][1])
+                };
             }
             geometry.push(points);
             uvs.push(uv);

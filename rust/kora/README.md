@@ -579,3 +579,13 @@ AI checked against real walls, in one change.
 * class `ai`'s per-object orientation matrices are simplified to a yaw for
   high-detail scenery;
 * the original's paid and online features, deliberately: see above.
+
+### If the tile artwork still looks shifted
+
+`KORA_UV_SCALE` and `KORA_UV_OFFSET` move the tile atlas's texture coordinates
+about the centre and by a delta, in texture units, without touching geometry -
+so a tile's shape cannot change, only which part of the atlas paints it.  They
+exist because the coordinates are the game's own, byte for byte (`at.java`),
+and the whole-track renders agree, yet a side-by-side with the original still
+looks slightly off; a value found by eye turns that into an offset to check
+against the models.  Unset, nothing is changed.
