@@ -1929,12 +1929,14 @@ fn modal_colour(image: &Image) -> [i32; 3] {
     ]
 }
 
-/// The models rely on `GL_REPEAT`: their texture coordinates are centred on
-/// zero and leave 0..1, because the authors let the lookup wrap.  macroquad has
+/// Some models rely on `GL_REPEAT`: a few scenery pieces leave 0..1 (e.g.
+/// `zdzn` spans u 0..8) because the game leaves every texture on the default
+/// `WRAP_REPEAT`.  macroquad has
 /// no wrap mode, so [`scene::Tiling`] copies the atlas over the window the
 /// coordinates occupy and rescales them into it.  Every mesh of every track has
 /// to end up inside its own copy, or the clamped lookup smears an edge across
-/// the polygon - which is what turned the tracks into a mess.
+/// the polygon - which is what turned the wrapping scenery into a mess (and,
+/// before the mesh bytes were decoded as signed, every car livery with it).
 #[test]
 fn every_track_texture_coordinate_fits_its_tiled_atlas() {
     let dir = assets();
@@ -1996,7 +1998,7 @@ fn every_track_texture_coordinate_fits_its_tiled_atlas() {
 /// coordinates, since a copy nine times too big is nine times the texture.
 #[test]
 fn tiling_a_texture_is_the_same_as_wrapping_it() {
-    // A car unwrap: u spans -0.49..0.49, v spans 0.514..1.493.
+    // A wrapping unwrap, e.g. scenery that spans two tiles: u spans -0.49..0.49, v spans 0.514..1.493.
     let tiling = scene::Tiling::for_bounds([-0.49, 0.49, 0.514, 1.493]);
     assert_eq!(tiling.size(128, 128), (256, 256), "window is [-1,1] x [0,2]");
     for step in 0..=100 {

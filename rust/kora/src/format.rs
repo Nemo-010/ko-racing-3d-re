@@ -103,8 +103,21 @@ impl Model {
             let x = r.i8() as f32;
             let y = r.i8() as f32;
             let z = r.i8() as f32;
-            let u = r.u8() as f32;
-            let v = r.u8() as f32;
+            // The texture components are signed bytes too, matching what the
+            // MIDlet feeds `VertexBuffer.setTexCoords` (class `at` reads every
+            // component with the unsigned `be.a` and stores it into a Java
+            // `byte[]`, which keeps the bits and reinterprets values above 127
+            // as negative).  KEmulator's lwjgl backend confirms the semantics:
+            // `getTexCoordBuffer(byte[], ...)` sign-extends each byte into the
+            // `GL_SHORT` texcoord pointer and the scale/bias goes through the
+            // GL texture matrix (`raw * scale + bias`), while the game's bias
+            // array is `128 * scale + bias` (the single `128.0` constant in
+            // `at`).  Decoding `u`/`v` as unsigned shifts every texel whose raw
+            // byte tops 127 by `256 * scale` - almost a full wrap, since the
+            // shipped `tex_scale` values sit near `1/256` - which is what smeared
+            // the car liveries across their bodies in the showroom.
+            let u = r.i8() as f32;
+            let v = r.i8() as f32;
             positions.push([
                 pos_scale * x + pos_offset,
                 pos_scale * y + pos_offset,

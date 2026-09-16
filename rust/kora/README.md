@@ -515,13 +515,19 @@ anywhere**.  (A vertical flip still samples a picture, just the wrong one, so
 `car_texture_coordinates_land_on_the_car` checks that the triangles land on the
 bodywork and the livery rather than the empty field beside it.)
 
-The models were authored against OpenGL's default `GL_REPEAT` and rely on it:
-the coordinates are centred on zero and leave 0..1 in both axes - a track tile
-spans u 0.39..1.50, a car's unwrap u 0.54..1.41 with negative v - because the
-authors let the lookup wrap round the image.  macroquad has no wrap mode at all
+The models were authored against OpenGL's default `GL_REPEAT` and a few
+scenery pieces rely on it - `zdzn` spans u 0..8 - because the game leaves
+every texture on the default `WRAP_REPEAT` (`cq` sets 241/241 explicitly with
+`FILTER_BASE_LEVEL`/`FILTER_NEAREST`; `at` never changes it).  Cars and tile-
+atlas pieces stay inside 0..1 once the mesh bytes are decoded as signed (the
+game casts each unsigned file byte to Java `byte`, and KEmulator's lwjgl
+backend sign-extends them into `GL_SHORT` texcoords with scale/bias on the
+texture matrix), so a clamped lookup in the copy is exactly a repeating lookup
+in the original.  macroquad has no wrap mode at all
 (miniquad's texture parameters default to `Clamp` and nothing exposes them), and
 clamping smears an edge pixel across every polygon that leaves 0..1, which is
-what turned the tracks into a mess.
+what turned the wrapping scenery - and, before the signed-byte fix, every car
+livery - into a mess.
 
 `scene::Tiling`, built from the coordinates each texture is actually used over,
 emulates it instead: the image is tiled over the integer window the coordinates

@@ -144,9 +144,11 @@ impl SurfaceGrid {
 /// clamped lookup is the only kind macroquad can do.
 ///
 /// The models were authored against OpenGL's default `GL_REPEAT` wrapping:
-/// their texture coordinates are centred on zero and routinely run out of
-/// 0..1 (a track tile spans u 0.39..1.50, a car's unwrap u 0.54..1.41), and
-/// the artists let the lookup wrap round the texture.  miniquad's texture
+/// the game leaves every `Texture2D` on the default `WRAP_REPEAT` (class `cq`
+/// sets it explicitly to 241/241 with `FILTER_BASE_LEVEL`/`FILTER_NEAREST`,
+/// class `at` never touches it), and a few scenery models rely on the wrap -
+/// `zdzn` spans u 0..8.  Cars and tile-atlas pieces stay inside 0..1 once the
+/// bytes are decoded as signed (see `format::Model`), but miniquad's texture
 /// parameters default to `Clamp` and macroquad exposes no way to change them,
 /// so the repeat is baked into the data instead: the image is tiled over the
 /// integer window the coordinates occupy and every coordinate is rescaled
