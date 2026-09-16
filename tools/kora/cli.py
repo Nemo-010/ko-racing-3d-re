@@ -230,6 +230,44 @@ def cmd_heights(args) -> int:
     return 0
 
 
+def cmd_pack(args) -> int:
+    """Rebuild a resource archive from a pack directory or an extracted tree."""
+    from . import pack as pack_module
+
+    if os.path.exists(os.path.join(args.source, pack_module.INDEX_NAME)):
+        archive = pack_module.ResourcePack.load(args.source)
+        resources = [(r.name, r.data) for r in archive.iter_resources()]
+        scratch = pack_module.scratch_bytes(args.source, max(
+            e.split(archive.page_size)[0] for e in archive.entries) + 1)
+        page_size = archive.page_size
+        print("repacking %s: %d resources, %d pages"
+              % (args.source, len(resources), max(scratch) + 1))
+    else:
+        resources = pack_module.read_tree(args.source)
+        scratch = {}
+        page_size = args.page_size
+        print("packing %s: %d resources" % (args.source, len(resources)))
+
+    if args.zero_scratch:
+        scratch = {}
+
+    pages = pack_module.write_pack(resources, args.out, page_size=page_size, scratch=scratch)
+    total = sum(len(data) for _name, data in resources)
+    print("wrote %s: %d resources, %d pages, %d bytes of resource data"
+          % (args.out, len(resources), pages, total))
+
+    if args.verify:
+        differences = pack_module.diff_packs(args.out, args.verify)
+        if not differences:
+            print("verify: byte-identical to %s" % args.verify)
+            return 0
+        print("verify: %d file(s) differ from %s" % (len(differences), args.verify))
+        for line in differences[:10]:
+            print("   " + line)
+        return 1
+    return 0
+
+
 def cmd_font(args) -> int:
     font, aw, ah, _atlas = fontimg.load_font(args.path)
     print("glyphs:      %d" % font.glyph_count)
@@ -289,6 +327,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path")
     p.add_argument("--tsv", action="store_true", help="emit tab-separated rows")
     p.set_defaults(func=cmd_campaign)
+
+    p = sub.add_parser("pack", help="rebuild an archive from a pack dir or a resource tree")
+    p.add_argument("source", help="a pack directory (holding data/data.*) or an extracted tree")
+    p.add_argument("out", help="directory to write data and data.* into")
+    p.add_argument("--page-size", type=int, default=1000,
+                   help="page size for a tree rebuild (default 1000)")
+    p.add_argument("--zero-scratch", action="store_true",
+                   help="leave each page's unwritten first byte as zero")
+    p.add_argument("--verify", help="compare the output against this archive")
+    p.set_defaults(func=cmd_pack)
 
     p = sub.add_parser("heights", help="road height per cell, from tile collision meshes")
     p.add_argument("resources", help="unpacked resource directory (the one holding tiles/ and levels/)")

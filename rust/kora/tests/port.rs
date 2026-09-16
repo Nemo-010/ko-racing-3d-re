@@ -1445,3 +1445,73 @@ fn the_theme_renders_from_the_games_midi() {
         samples.len()
     );
 }
+
+/// The rule the shipped archive was packed with, replayed over the resource
+/// sizes.  This is what the repack tool implements: a page is filled while the
+/// running offset is below the page size, the resource that crosses the
+/// boundary overflows the page, and each page therefore starts at offset 1.
+#[test]
+fn the_archive_packing_rule_reproduces_every_offset() {
+    let dir = assets();
+    let resources = pack::load(&dir);
+
+    let index = std::fs::read(dir.join("data")).expect("the archive index");
+    let count = u16::from_be_bytes([index[0], index[1]]) as usize;
+    let page_size = i32::from_be_bytes([index[2], index[3], index[4], index[5]]) as usize;
+    let mut at = 6usize;
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let length = index[at] as usize;
+        at += 1;
+        let name = String::from_utf8_lossy(&index[at..at + length]).into_owned();
+        at += length;
+        let offset =
+            i32::from_be_bytes([index[at], index[at + 1], index[at + 2], index[at + 3]]) as usize;
+        at += 4;
+        entries.push((name, offset));
+    }
+    assert_eq!(at, index.len(), "the index should have no trailing bytes");
+
+    let (mut page, mut skip) = (0usize, 1usize);
+    let mut wrong = Vec::new();
+    for (name, offset) in &entries {
+        if skip >= page_size {
+            page += 1;
+            skip = 1;
+        }
+        let derived = page * page_size + skip;
+        if *offset != derived {
+            wrong.push(format!("{name}: stored {offset}, rule says {derived}"));
+        }
+        skip += resources[name].len();
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} of {} entries disagree with the packing rule: {wrong:?}",
+        wrong.len(),
+        entries.len()
+    );
+
+    // And the consequence that makes the format self-consistent: a skip is
+    // always under the page size, while a page *file* may be longer.
+    let pages = entries
+        .iter()
+        .map(|(_, offset)| offset / page_size)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let mut over = 0;
+    for page in 0..pages {
+        let length = std::fs::metadata(dir.join(format!("data.{page}")))
+            .map(|meta| meta.len())
+            .unwrap_or(0);
+        if length > page_size as u64 {
+            over += 1;
+        }
+    }
+    assert!(
+        over * 2 > pages as u64,
+        "only {over} of {pages} page files are longer than the page size, \
+         which is not the archive this rule describes"
+    );
+}

@@ -60,6 +60,7 @@ python3 -m kora unpack x/ assets/              # extract every resource
 python3 -m kora obj assets/models assets/obj   # meshes -> OBJ
 python3 -m kora mapimg assets/levels minimaps/ # track layouts -> PNG
 python3 -m kora font assets/fonts/font         # font metrics + char map
+python3 -m kora pack x/ rebuilt/ --verify x/   # rebuild the archive, byte for byte
 python3 -m kora fontimg assets/fonts/font Hi out.png
 python3 -m kora dump assets/ --json            # parse all known formats
 ```
@@ -126,7 +127,12 @@ All formats are big endian and use a `u8 length + bytes` string primitive.
 Full byte tables are in [`tools/README.md`](tools/README.md). Summary:
 
 * **pack** — `data` is an index (`u16 count`, `i32 page_size`, then
-  `str name` + `i32 offset` per entry); `data.N` are 1000-byte pages.  The
+  `str name` + `i32 offset` per entry).  A page is filled while its running
+  offset is below `page_size`, so the resource that crosses the boundary
+  overflows it and a `data.N` file can exceed 1000 bytes (`data.50` is 4942);
+  byte 0 of every page is never written, which is the packer's one piece of
+  leftover.  `python3 -m kora pack` writes archives with the same rule, and a
+  repack of the shipped one is byte-identical.  The
   game seeks to an offset and reads as far as the format needs.
 * **mesh** — 4 floats stored as ASCII text, then `u8`-count vertices of
   `i8 x,y,z + u8 u,v`, `u8` strip lengths and a `u16`-counted `u8` index

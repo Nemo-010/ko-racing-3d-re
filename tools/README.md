@@ -64,18 +64,38 @@ around the same package. To use the package from another script, put
 
 ```
 u16   resource_count
-i32   page_size                 # always 1000
+i32   page_size                 # the page stride, always 1000
 repeat resource_count:
     u8    name_len
     u8[]  name                  # e.g. "cars/1.car"
-    i32   offset                # absolute offset in the virtual stream
+    i32   offset                # page * page_size + skip
 ```
 
 `page = offset / page_size`, `skip = offset % page_size`. The blob runs
 from `skip` in `data.<page>` to the next entry in that page (or EOF). Byte 0
-of every page is unused scratch, so the first resource usually starts at
-offset 1. The game itself never needs the length; it seeks and lets the
-format parser stop when it is done.
+of every page is unused scratch, so the first resource starts at offset 1.
+The game itself never needs the length; it seeks and lets the format parser
+stop when it is done.
+
+**A page file is not `page_size` bytes long.**  A page is filled while its
+running offset is below `page_size`, so the resource that crosses the boundary
+overflows the page instead of starting the next one - `data.50` is 4942 bytes.
+`page_size` partitions the *offsets*, which is why a skip is always under it
+while a file can be far longer.  Replaying that rule over the 668 resource
+sizes reproduces every stored offset, and `python3 -m kora pack` writes archives
+with it:
+
+```sh
+python3 -m kora pack x/ rebuilt/ --verify x/     # repack, and check byte for byte
+python3 -m kora pack assets/ rebuilt/            # rebuild from an extracted tree
+```
+
+A repack of the shipped archive is byte-identical.  The one thing that has to be
+carried across is the byte at offset 0 of each page: it is never written, and in
+the shipped archive it holds 252, 138, 180 and so on, matching nothing derivable
+- it is the packer's leftover buffer.  `pack` copies it from the source archive;
+`--zero-scratch` leaves it as zero instead, which is the only difference a
+rebuild from an extracted tree has.
 
 ## `.car` — car descriptor (`ba.a(int)`)
 
