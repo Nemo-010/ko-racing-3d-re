@@ -21,7 +21,7 @@ use kora::menu::{self, Outcome};
 use kora::physics::{CarControl, World};
 use kora::progress::{self, Progress};
 use kora::race::Race;
-use kora::text::GameFont;
+use kora::text;
 use kora::{pack, scene};
 
 fn assets_dir() -> PathBuf {
@@ -289,48 +289,47 @@ impl Running {
         set_default_camera();
     }
 
-    fn draw_hud(&self, font: &GameFont, now: f64, laps: u32) {
+    fn draw_hud(&self, now: f64, laps: u32) {
         let race = &self.races[self.player];
         let place = self.place_of(self.player) + 1;
-        let scale = 2.0;
-        font.draw_shadow(&self.event.name, 16.0, 14.0, scale, WHITE);
-        font.draw_shadow(
+        text::draw_shadow(&self.event.name, 16.0, 14.0, 28.0, WHITE);
+        text::draw_shadow(
             &format!("LAP {}/{}", (race.lap + 1).min(laps), laps),
             16.0,
-            48.0,
-            scale,
+            50.0,
+            28.0,
             WHITE,
         );
-        font.draw_shadow(
+        text::draw_shadow(
             &format!("POS {}/{}", place, self.world.cars.len()),
             16.0,
-            82.0,
-            scale,
+            86.0,
+            28.0,
             WHITE,
         );
-        font.draw_shadow(
+        text::draw_shadow(
             &format!("TIME {}", menu::format_time(race.total_time(now))),
             16.0,
-            116.0,
-            scale,
+            122.0,
+            28.0,
             WHITE,
         );
         let best = race
             .best
             .map(menu::format_time)
             .unwrap_or_else(|| "--:--".to_string());
-        font.draw_shadow(
+        text::draw_shadow(
             &format!("LAP {}  BEST {}", menu::format_time(race.lap_time(now)), best),
             16.0,
-            150.0,
-            scale,
+            158.0,
+            28.0,
             Color::new(1.0, 0.85, 0.2, 1.0),
         );
-        font.draw_shadow(
+        text::draw_shadow(
             "ARROWS DRIVE   SPACE BRAKE   ESC PAUSE",
             16.0,
             screen_height() - 40.0,
-            1.5,
+            20.0,
             Color::new(0.9, 0.9, 0.9, 1.0),
         );
     }
@@ -343,7 +342,6 @@ async fn main() {
     let resources = pack::load(&dir);
     println!("  {} resources indexed", resources.len());
 
-    let font = GameFont::load(&resources, "font");
     let cars = progress::car_infos(&resources);
     let career = campaign::events(&resources);
     let quick = campaign::quick_events(&resources);
@@ -396,11 +394,9 @@ async fn main() {
 
         match screen {
             Screen::Main => {
-                if let Some(font) = &font {
-                    menu::draw_main(font, &progress, cursor);
-                    if !message.is_empty() {
-                        font.draw_shadow(&message, 16.0, screen_height() - 44.0, 1.4, WHITE);
-                    }
+                menu::draw_main(&progress, cursor);
+                if !message.is_empty() {
+                    text::draw_shadow(&message, 16.0, screen_height() - 44.0, 19.0, WHITE);
                 }
                 if is_key_pressed(KeyCode::Up) {
                     cursor = (cursor + 3) % 4;
@@ -438,9 +434,7 @@ async fn main() {
                     screen = Screen::Main;
                 } else {
                     cursor = cursor.min(events.len() - 1);
-                    if let Some(font) = &font {
-                        menu::draw_events(font, &progress, events, cursor, title);
-                    }
+                    menu::draw_events(&progress, events, cursor, title);
                     if is_key_pressed(KeyCode::Up) {
                         cursor = cursor.saturating_sub(1);
                     }
@@ -476,9 +470,7 @@ async fn main() {
                     screen = Screen::Main;
                 } else {
                     cursor = cursor.min(cars.len() - 1);
-                    if let Some(font) = &font {
-                        menu::draw_cars(font, &cars, &progress, cursor);
-                    }
+                    menu::draw_cars(&cars, &progress, cursor);
                     if is_key_pressed(KeyCode::Up) {
                         cursor = cursor.saturating_sub(1);
                     }
@@ -511,9 +503,7 @@ async fn main() {
                     let laps = env_number("KORA_LAPS", 99).unwrap_or(run.event.laps).max(1);
                     let finished = run.update(dt, laps);
                     run.draw_world(dt);
-                    if let Some(font) = &font {
-                        run.draw_hud(font, get_time(), laps);
-                    }
+                    run.draw_hud(get_time(), laps);
                     if let Some(outcome) = finished {
                         // Award the medal once, and only for an improvement.
                         let (medal, gained) =
@@ -532,9 +522,7 @@ async fn main() {
 
             Screen::Paused => {
                 clear_background(menu::BACKDROP);
-                if let Some(font) = &font {
-                    menu::draw_pause(font, cursor);
-                }
+                menu::draw_pause(cursor);
                 if is_key_pressed(KeyCode::Up) {
                     cursor = (cursor + 2) % 3;
                 }
@@ -570,9 +558,7 @@ async fn main() {
 
             Screen::Results => {
                 if let Some(run) = running.as_ref() {
-                    if let Some(font) = &font {
-                        menu::draw_results(font, &run.event, &progress, run.outcome.as_ref().expect("outcome"));
-                    }
+                    menu::draw_results(&run.event, &progress, run.outcome.as_ref().expect("outcome"));
                 }
                 if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Escape) {
                     let back = running.as_ref().map(|run| run.back).unwrap_or(Screen::Main);

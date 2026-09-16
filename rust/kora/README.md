@@ -74,15 +74,13 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
   between two tiles instead of being trapped by them.
 * **Menus** (`menu`) - main menu, the career event list, a quick-race list of
   all 40 tracks, car selection with each car's four stat bars, a pause menu and
-  a results panel, all drawn with the game's own bitmap font.  Locked events
-  grey out and show the points they need.
+  a results panel.  Locked events grey out and show the points they need.
 * **Career progress** (`progress`) - medals and points.  A race's entry
   threshold and award come from its `.000` record, the medal from the finishing
   position (gold, silver, bronze), and a better medal on a race already won
   only pays the difference so a race cannot be farmed.  Points and the chosen
   car are saved to `KORA_SAVE`.
-* **HUD** (`text`) - lap, position, total time, current and best lap, drawn
-  with the game's own bitmap font (`/fonts/font` + `font.tab` + `font.png`).
+* **HUD** (`text`) - lap, position, total time, current and best lap.
 
 ## Layout
 
@@ -97,7 +95,7 @@ src/scene.rs     map -> baked meshes + collision + barriers + car geometry
 src/physics.rs   rapier world and cars
 src/ai.rs        opponent driving
 src/race.rs      laps, checkpoints and timing
-src/text.rs      bitmap-font HUD
+src/text.rs      text drawing, over macroquad's rasteriser
 src/main.rs      macroquad front-end
 tests/port.rs    headless checks
 ```
@@ -130,6 +128,24 @@ macroquad context.
 | `medals_and_points_persist` | medal rules, points only for an improvement, save/load |
 | `career_and_quick_lists_are_built` | the 47 career events, the 40 quick-race tracks and the 8 cars |
 | `a_race_runs_to_the_flag_and_scores` | a whole 2-lap race with four AI cars, scored as the results screen does |
+
+## Text
+
+Everything on screen goes through macroquad's own text renderer, which
+rasterises glyphs with `fontdue` at whatever pixel size is asked for, so the
+menus and HUD stay sharp at every scale.  `src/text.rs` is a thin wrapper that
+keeps the callers thinking in "top of a line" coordinates and adds a drop
+shadow; the default `ProggyClean` face is monospaced, which suits the columnar
+event and car lists.
+
+The pack's own fonts are still fully decoded - `python3 -m kora font` prints a
+font's metrics and character map and `python3 -m kora fontimg` renders sample
+text, and `tools/README.md` has the layouts.  They are not used at runtime
+because macroquad's `Font` is fontdue-based and takes TrueType outlines, so a
+bitmap atlas cannot be loaded into it.
+
+Text is the one thing not covered by the tests: macroquad rasterises it through
+a live graphics context, so measuring or drawing a string needs a window.
 
 ## Coordinate conventions
 

@@ -220,7 +220,9 @@ a collision world taken from each tile's collision mesh, so ramps and
 platforms are real; a rapier raycast vehicle for the player plus AI opponents
 that follow the road; lap, checkpoint and timing rules; and menus - main menu,
 career event list, quick race, car selection with stat bars, pause and results
-- with medals and career points saved between runs.  `cargo test --release`
+- with medals and career points saved between runs.  On-screen text uses
+macroquad's own font rasteriser rather than the pack's bitmap fonts, which the
+tooling still decodes.  `cargo test --release`
 runs 19 headless checks, including building all 40 tracks, driving AI round
 four of them, a whole race run to the flag and scored, and the medal rules.
 

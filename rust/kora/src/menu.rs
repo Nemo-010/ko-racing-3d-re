@@ -10,7 +10,7 @@ use macroquad::prelude::*;
 
 use crate::campaign::RaceEvent;
 use crate::progress::{medal_name, CarInfo, Progress};
-use crate::text::GameFont;
+use crate::text;
 
 pub const BACKDROP: Color = Color::new(0.05, 0.07, 0.12, 1.0);
 const PANEL: Color = Color::new(1.0, 1.0, 1.0, 0.06);
@@ -36,19 +36,18 @@ fn panel(rect: Rect) {
     draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, Color::new(1.0, 1.0, 1.0, 0.15));
 }
 
-fn centred(font: &GameFont, text: &str, y: f32, scale: f32, color: Color) {
-    let width = font.width(text, scale);
-    font.draw_shadow(text, (screen_width() - width) / 2.0, y, scale, color);
+fn centred(label: &str, y: f32, size: f32, color: Color) {
+    let width = text::width(label, size);
+    text::draw_shadow(label, (screen_width() - width) / 2.0, y, size, color);
 }
 
-pub fn draw_main(font: &GameFont, progress: &Progress, cursor: usize) {
-    centred(font, "K.O. RACING 3D", screen_height() * 0.16, 4.0, WHITE);
-    centred(font, "RUST PORT", screen_height() * 0.16 + 46.0, 1.6, ACCENT);
+pub fn draw_main(progress: &Progress, cursor: usize) {
+    centred("K.O. RACING 3D", screen_height() * 0.16, 54.0, WHITE);
+    centred("RUST PORT", screen_height() * 0.16 + 62.0, 22.0, ACCENT);
     centred(
-        font,
         &format!("CAREER POINTS {}", progress.points),
-        screen_height() * 0.16 + 78.0,
-        1.4,
+        screen_height() * 0.16 + 92.0,
+        19.0,
         LOCKED,
     );
 
@@ -63,27 +62,20 @@ pub fn draw_main(font: &GameFont, progress: &Progress, cursor: usize) {
         if index == cursor {
             draw_rectangle(left - 6.0, y - 4.0, width + 12.0, row - 4.0, HIGHLIGHT);
         }
-        font.draw_shadow(item, left + 16.0, y, 1.8, WHITE);
+        text::draw_shadow(item, left + 16.0, y, 24.0, WHITE);
     }
     centred(
-        font,
         "ARROWS SELECT   ENTER CONFIRM   ESC BACK",
         screen_height() - 22.0,
-        1.3,
+        17.0,
         LOCKED,
     );
 }
 
 /// A scrolling list of races, showing the medal already won and greying out
 /// the ones the player's points have not reached.
-pub fn draw_events(
-    font: &GameFont,
-    progress: &Progress,
-    events: &[RaceEvent],
-    cursor: usize,
-    title: &str,
-) {
-    centred(font, title, 14.0, 2.4, WHITE);
+pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, title: &str) {
+    centred(title, 12.0, 32.0, WHITE);
     let row = 26.0;
     let top = 56.0;
     let visible = ((screen_height() - top - 40.0) / row) as usize;
@@ -97,45 +89,38 @@ pub fn draw_events(
             draw_rectangle(24.0, y - 3.0, screen_width() - 48.0, row - 3.0, HIGHLIGHT);
         }
         let color = if open { WHITE } else { LOCKED };
-        font.draw_shadow(
-            &format!("{:<16}", event.name),
-            32.0,
-            y,
-            1.5,
-            color,
-        );
-        font.draw_shadow(&format!("{:<10}", event.map), 260.0, y, 1.5, color);
-        font.draw_shadow(&format!("{:<4}", event.laps), 430.0, y, 1.5, color);
-        font.draw_shadow(&format!("{:<3}", event.opponents), 480.0, y, 1.5, color);
+        text::draw_shadow(&format!("{:<16}", event.name), 32.0, y, 20.0, color);
+        text::draw_shadow(&format!("{:<10}", event.map), 260.0, y, 20.0, color);
+        text::draw_shadow(&format!("{:<4}", event.laps), 440.0, y, 20.0, color);
+        text::draw_shadow(&format!("{:<3}", event.opponents), 490.0, y, 20.0, color);
         if open {
             let medal = progress.best(&event.key);
-            font.draw_shadow(medal_name(medal), 530.0, y, 1.5, medal_color(medal));
+            text::draw_shadow(medal_name(medal), 540.0, y, 20.0, medal_color(medal));
         } else {
-            font.draw_shadow(
-                &format!("NEED {}", event.threshold),
-                530.0,
-                y,
-                1.5,
-                LOCKED,
-            );
+            text::draw_shadow(&format!("NEED {}", event.threshold), 540.0, y, 20.0, LOCKED);
         }
     }
 
-    font.draw_shadow("LAPS", 430.0, top - 20.0, 1.3, LOCKED);
-    font.draw_shadow("CPU", 480.0, top - 20.0, 1.3, LOCKED);
-    font.draw_shadow("MEDAL", 530.0, top - 20.0, 1.3, LOCKED);
-    font.draw_shadow(
-        &format!("{} of {} events   points {}", cursor.min(events.len().saturating_sub(1)) + 1, events.len(), progress.points),
+    text::draw_shadow("LAPS", 440.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow("CPU", 490.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow("MEDAL", 540.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow(
+        &format!(
+            "{} of {} events   {} points",
+            cursor.min(events.len().saturating_sub(1)) + 1,
+            events.len(),
+            progress.points
+        ),
         32.0,
         screen_height() - 22.0,
-        1.3,
+        17.0,
         LOCKED,
     );
 }
 
 /// The four stat bars `ba.a(car, stat)` feeds the garage display.
-pub fn draw_cars(font: &GameFont, cars: &[CarInfo], progress: &Progress, cursor: usize) {
-    centred(font, "SELECT CAR", 14.0, 2.4, WHITE);
+pub fn draw_cars(cars: &[CarInfo], progress: &Progress, cursor: usize) {
+    centred("SELECT CAR", 12.0, 32.0, WHITE);
     const LABELS: [&str; 4] = ["SPEED", "GRIP", "ACCEL", "WEIGHT"];
     let row = 52.0;
     let top = 60.0;
@@ -145,19 +130,19 @@ pub fn draw_cars(font: &GameFont, cars: &[CarInfo], progress: &Progress, cursor:
             draw_rectangle(24.0, y - 6.0, screen_width() - 48.0, row - 8.0, HIGHLIGHT);
         }
         let selected = index == progress.car;
-        font.draw_shadow(
+        text::draw_shadow(
             &format!("{:<14}", car.name),
             32.0,
             y,
-            1.7,
+            23.0,
             if selected { ACCENT } else { WHITE },
         );
-        font.draw_shadow(&format!("{:<14}", car.file), 380.0, y, 1.2, LOCKED);
+        text::draw_shadow(&format!("{:<14}", car.file), 400.0, y, 16.0, LOCKED);
         for (stat, value) in car.stats.iter().enumerate() {
-            let by = y + 16.0 + stat as f32 * 8.0;
-            font.draw_shadow(LABELS[stat], 380.0, by, 0.9, LOCKED);
+            let by = y + 16.0 + stat as f32 * 9.0;
+            text::draw_shadow(LABELS[stat], 400.0, by, 12.0, LOCKED);
             for segment in 0..6 {
-                let x = 440.0 + segment as f32 * 12.0;
+                let x = 470.0 + segment as f32 * 13.0;
                 let on = segment < *value;
                 draw_rectangle(
                     x,
@@ -169,28 +154,28 @@ pub fn draw_cars(font: &GameFont, cars: &[CarInfo], progress: &Progress, cursor:
             }
         }
     }
-    font.draw_shadow(
+    text::draw_shadow(
         "ARROWS SELECT   ENTER CHOOSE   ESC BACK",
         32.0,
         screen_height() - 22.0,
-        1.3,
+        17.0,
         LOCKED,
     );
 }
 
-pub fn draw_pause(font: &GameFont, cursor: usize) {
+pub fn draw_pause(cursor: usize) {
     let items = ["RESUME", "RESTART", "QUIT TO MENU"];
     let width = 260.0;
     let left = (screen_width() - width) / 2.0;
     let top = screen_height() * 0.4;
     panel(Rect::new(left - 12.0, top - 30.0, width + 24.0, items.len() as f32 * 34.0 + 56.0));
-    centred(font, "PAUSED", top - 40.0, 2.4, WHITE);
+    centred("PAUSED", top - 44.0, 32.0, WHITE);
     for (index, item) in items.iter().enumerate() {
         let y = top + index as f32 * 34.0;
         if index == cursor {
             draw_rectangle(left - 6.0, y - 4.0, width + 12.0, 30.0, HIGHLIGHT);
         }
-        font.draw_shadow(item, left + 16.0, y, 1.8, WHITE);
+        text::draw_shadow(item, left + 16.0, y, 24.0, WHITE);
     }
 }
 
@@ -205,17 +190,17 @@ pub struct Outcome {
     pub cars: usize,
 }
 
-pub fn draw_results(font: &GameFont, event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
+pub fn draw_results(event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
     let width = 460.0;
     let left = (screen_width() - width) / 2.0;
     let top = screen_height() * 0.22;
     panel(Rect::new(left - 12.0, top - 46.0, width + 24.0, 300.0));
-    centred(font, &event.name, top - 56.0, 2.6, WHITE);
+    centred(&event.name, top - 58.0, 34.0, WHITE);
 
     let line = |index: usize, label: &str, value: &str, color: Color| {
         let y = top + index as f32 * 32.0;
-        font.draw_shadow(label, left + 20.0, y, 1.6, LOCKED);
-        font.draw_shadow(value, left + width - 20.0 - font.width(value, 1.6), y, 1.6, color);
+        text::draw_shadow(label, left + 20.0, y, 21.0, LOCKED);
+        text::draw_shadow(value, left + width - 20.0 - text::width(value, 21.0), y, 21.0, color);
     };
     line(0, "POSITION", &format!("{} of {}", outcome.place + 1, outcome.cars),
          if outcome.place == 0 { GOLD } else { WHITE });
@@ -225,13 +210,7 @@ pub fn draw_results(font: &GameFont, event: &RaceEvent, progress: &Progress, out
     line(4, "MEDAL", medal_name(outcome.medal), medal_color(outcome.medal));
     line(5, "POINTS", &format!("+{}  (total {})", outcome.gained, progress.points), ACCENT);
 
-    centred(
-        font,
-        "ENTER CONTINUE",
-        top + 220.0,
-        1.5,
-        LOCKED,
-    );
+    centred("ENTER CONTINUE", top + 224.0, 20.0, LOCKED);
 }
 
 pub fn format_time(seconds: f32) -> String {

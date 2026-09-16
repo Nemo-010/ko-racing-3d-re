@@ -1,73 +1,34 @@
-//! HUD text drawn with the game's own bitmap font.
+//! Text drawing for the menus and the HUD.
 //!
-//! `/fonts/<name>` holds the advance widths and cell height, `<name>.tab`
-//! maps characters to glyph slots and `<name>.png` is the atlas (see
-//! `tools/README.md` for the byte layout).  Glyph rectangles are recovered by
-//! wrapping the atlas at the image width.
+//! This goes through macroquad's own text renderer, which rasterises glyphs
+//! with `fontdue` at whatever pixel size is asked for, so the interface stays
+//! sharp at every scale instead of magnifying a fixed bitmap.
+//!
+//! The pack's bitmap fonts (`/fonts/<name>` + `.tab` + `.png`) are still fully
+//! decoded and documented - `tools/README.md` has the layouts and
+//! `python3 -m kora fontimg` renders them - but the running game does not need
+//! them: macroquad's `Font` is fontdue-based and takes TrueType outlines, so a
+//! texture atlas cannot be loaded into it.
 
 use macroquad::prelude::*;
 
-use crate::format;
-use crate::pack::Resources;
-
-pub struct GameFont {
-    font: format::Font,
-    rects: Vec<(u32, u32, u32, u32)>,
-    texture: Texture2D,
+/// Draw `text` with its top-left at `(x, y)`, returning its width.
+pub fn draw(text: &str, x: f32, y: f32, size: f32, color: Color) -> f32 {
+    let metrics = measure_text(text, None, size as u16, 1.0);
+    // `draw_text` places the baseline, so shift down by the offset for the
+    // callers, which all think in terms of the top of a line.
+    draw_text(text, x, y + metrics.offset_y, size, color);
+    metrics.width
 }
 
-impl GameFont {
-    pub fn load(res: &Resources, name: &str) -> Option<GameFont> {
-        let metrics = res.get(&format!("fonts/{name}"))?;
-        let table = res
-            .get(&format!("fonts/{name}.tab"))
-            .and_then(|bytes| format::FontTable::parse(bytes));
-        let font = format::Font::parse(metrics, table)?;
-        let texture = Texture2D::from_file_with_format(
-            res.get(&format!("fonts/{name}.png"))?,
-            Some(ImageFormat::Png),
-        );
-        texture.set_filter(FilterMode::Linear);
-        let rects = font.layout(texture.width() as u32);
-        Some(GameFont {
-            font,
-            rects,
-            texture,
-        })
-    }
+/// Width of `text` at `size`, for laying a row out.
+pub fn width(text: &str, size: f32) -> f32 {
+    measure_text(text, None, size as u16, 1.0).width
+}
 
-    pub fn width(&self, text: &str, scale: f32) -> f32 {
-        self.font.text_width(text) * scale
-    }
-
-    /// Draw *text* with its top-left at `(x, y)`.
-    pub fn draw(&self, text: &str, x: f32, y: f32, scale: f32, color: Color) -> f32 {
-        let mut pen = x;
-        for ch in text.chars() {
-            let glyph = self.font.glyph_for(ch);
-            if let Some(&(gx, gy, gw, gh)) = self.rects.get(glyph) {
-                if gw > 0 && gh > 0 {
-                    draw_texture_ex(
-                        &self.texture,
-                        pen,
-                        y,
-                        color,
-                        DrawTextureParams {
-                            dest_size: Some(vec2(gw as f32 * scale, gh as f32 * scale)),
-                            source: Some(Rect::new(gx as f32, gy as f32, gw as f32, gh as f32)),
-                            ..Default::default()
-                        },
-                    );
-                }
-            }
-            pen += self.font.width(ch) as f32 * scale;
-        }
-        pen - x
-    }
-
-    /// Draw with a one-pixel dark drop shadow, as the MIDlet does.
-    pub fn draw_shadow(&self, text: &str, x: f32, y: f32, scale: f32, color: Color) {
-        self.draw(text, x + scale, y + scale, scale, Color::new(0.0, 0.0, 0.0, 0.6));
-        self.draw(text, x, y, scale, color);
-    }
+/// Draw with a small drop shadow, as the MIDlet does for its own text.
+pub fn draw_shadow(label: &str, x: f32, y: f32, size: f32, color: Color) {
+    let offset = (size * 0.06).max(1.0);
+    draw(label, x + offset, y + offset, size, Color::new(0.0, 0.0, 0.0, 0.65));
+    draw(label, x, y, size, color);
 }
