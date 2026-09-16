@@ -162,6 +162,15 @@ fn start_race(
     let car_def = resources
         .get(&format!("cars/{car_file}"))
         .and_then(|bytes| kora::format::Car::parse(bytes))?;
+    // `cl.a(cf, boolean)` picks the model by the graphics detail setting -
+    // `al.d() > 0 ? car.model : car.low_model` - and the two are very
+    // different: `bonus` is 92 triangles and `bonus_low` is 48.  The port used
+    // the high-detail body whatever the setting said, so at LOW it was drawing
+    // a car the game would not have.
+    let mut car_def = car_def;
+    if settings.quality == kora::settings::Quality::Low {
+        car_def.model = car_def.low_model.clone();
+    }
     let mut geometry = scene::build_car(resources, &car_def)?;
     let texture = scene::load_car_texture(resources, &mut geometry);
     let tuning = Tuning::from_stats(car_def.stats);
@@ -558,14 +567,24 @@ async fn main() {
         .cloned()
         .collect();
     let quick = campaign::quick_events(&resources);
+    let settings_path = match std::env::var("KORA_SETTINGS") {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => paths::file(paths::Dir::Config, "settings.txt"),
+    };
+    let mut settings = Settings::load(&settings_path);
+    println!("settings: {}", settings_path.display());
+
     // The showroom draws the picked car in 3D, the way `u.j()` renders
     // `bd.a.a(car, angle)` through a transform while the panel spins at ten
     // degrees a second.  Display only: nothing here can be bought.
     let showroom: Vec<(scene::CarGeometry, Option<Texture2D>)> = cars
         .iter()
         .filter_map(|car| {
-            let definition =
+            let mut definition =
                 format::Car::parse(resources.get(&format!("cars/{}", car.file))?)?;
+            if settings.quality == kora::settings::Quality::Low {
+                definition.model = definition.low_model.clone();
+            }
             let mut geometry = scene::build_car(&resources, &definition)?;
             let texture = scene::load_car_texture(&resources, &mut geometry);
             Some((geometry, texture))
@@ -579,13 +598,6 @@ async fn main() {
         deluxe.len(),
         quick.len()
     );
-
-    let settings_path = match std::env::var("KORA_SETTINGS") {
-        Ok(path) => PathBuf::from(path),
-        Err(_) => paths::file(paths::Dir::Config, "settings.txt"),
-    };
-    let mut settings = Settings::load(&settings_path);
-    println!("settings: {}", settings_path.display());
 
     // The one sound the game ships is a MIDI file at the JAR root, not in the
     // resource pack, so `setup.sh` puts it beside the pack.  macroquad cannot
