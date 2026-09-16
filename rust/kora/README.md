@@ -445,6 +445,16 @@ bitmap atlas cannot be loaded into it.
 Text is the one thing not covered by the tests: macroquad rasterises it through
 a live graphics context, so measuring or drawing a string needs a window.
 
+## What the world is drawn at
+
+The world is rendered offscreen at the MIDlet's own resolution - 240 lines, the
+window's shape - and scaled up to the window, because the artwork was made for
+it: a track tile carries about a hundred pixels of texture, and a 14-unit tile
+on a 720-line window magnifies that four to eight times, which reads as a mosaic
+of texels rather than as a road.  The HUD and the menus stay at the window's own
+resolution, where text belongs.  The camera also uses the game's own field of
+view, 90 degrees: `bq.a` sets the M3G perspective to that for every view.
+
 ## Coordinate conventions
 
 The game is Z-up on paper, but **its models put Z downwards**, and the port has
@@ -522,6 +532,26 @@ as-is.
 * rapier's default wheel tuning assumes ~0.5 m of suspension travel.
   Equilibrium compression is `g / (4 * stiffness)` regardless of mass, so a
   car half a unit tall needs stiffness ~24 or the chassis drags on the road.
+
+## Known wrong: the collision height's sign
+
+`scene::surface_height` reads `-z * 14` where it should read `+z * 14`, and the
+note on that function explains why it is left alone for now.  The MIDlet's `a`
+negates the third component of every collision triangle because its own world
+has Z pointing down, and this port maps that world to Y-up once, in
+`game_to_world` - so the negation must not be repeated.  All 26 tiles that ship
+a collision mesh agree: a tile whose model raises a 4.2-unit wall reports
+`+4.2`, and a sunken one (`vl`) reports `-0.7`, matching its model to the
+hundredth.
+
+Flipping it looks like a one-character change and is not.  The same negation
+also *buries* the edge barriers this port builds for itself, which are placed at
+`height_at` too, and it turns the map's own wall tiles into pits the cars drop
+into harmlessly: between them the two mistakes cancelled, which is why the port
+has never actually collided with a wall, and why every ramp in it is inside out
+in a way no driving test can see - the collider and the height function share
+the source.  Correcting the sign has to come with the barrier placement and the
+AI checked against real walls, in one change.
 
 ## Not implemented
 

@@ -244,7 +244,25 @@ fn rotate_sample(point: Vec2, arg: u8) -> Vec2 {
 
 /// The game's height function: the interpolated collision mesh height in world
 /// units, or zero when the tile has no mesh or the point falls outside it.
-fn surface_height(collision: Option<&format::Collision>, arg: u8, local: Vec2) -> f32 {
+///
+/// **This sign is wrong, and it is left alone on purpose.**  The MIDlet negates
+/// the third component when it builds each triangle (`a`), because its world has
+/// Z pointing down, and this port already maps that world to Y-up once - so the
+/// right height is `+z * TILE`, not `-z * TILE`.  Every one of the 26 tiles that
+/// ship a collision mesh agrees: with the sign flipped, a tile whose model
+/// raises a 4.2-unit barrier reports `+4.2`, where the model's kerbs and walls
+/// are (see the table in `the_game_z_axis_points_down`).
+///
+/// Flipping it here breaks the driving, for a reason worth writing down: the
+/// negation also *buries* the edge barriers this port builds for itself, since
+/// those are placed at `height_at` too, and it turns the map's own wall tiles
+/// into 4.2-unit pits the cars drop into harmlessly.  Between them the two
+/// mistakes cancelled, and the port has never actually collided with a wall.
+/// Correcting the sign therefore needs the barrier placement and the AI
+/// re-checked against real walls in the same change - work that wants a pair of
+/// eyes on it, not a blind flip.  Until then the cars sink into a kerb when they
+/// cut a corner, and every ramp in the port is inside out.
+pub fn surface_height(collision: Option<&format::Collision>, arg: u8, local: Vec2) -> f32 {
     let Some(collision) = collision else {
         return 0.0;
     };
@@ -265,8 +283,9 @@ fn surface_height(collision: Option<&format::Collision>, arg: u8, local: Vec2) -
         let u = ((b[1] - c[1]) * (point.x - c[0]) + (c[0] - b[0]) * (point.y - c[1])) / determinant;
         let v = ((c[1] - a[1]) * (point.x - c[0]) + (a[0] - c[0]) * (point.y - c[1])) / determinant;
         if u >= -1e-6 && v >= -1e-6 && u + v <= 1.0 + 1e-6 {
-            // The third component is negated when the MIDlet builds the
-            // triangle, and the mesh shares the tile's 14-unit scale.
+            // The mesh shares the tile's 14-unit scale.  The sign here is wrong
+            // - see the note on this function - and is kept until the barriers
+            // and the AI can be corrected with it.
             return -(u * a[2] + v * b[2] + (1.0 - u - v) * c[2]) * TILE;
         }
     }

@@ -111,6 +111,9 @@ struct Running {
     camera: Vec3,
     finish_order: Vec<usize>,
     outcome: Option<Outcome>,
+    /// The offscreen the world is drawn into, and its size so it can be rebuilt
+    /// when the window changes.
+    target: Option<(RenderTarget, Vec2)>,
 }
 
 impl Running {
@@ -206,6 +209,7 @@ fn start_race(
         camera,
         finish_order: Vec::new(),
         outcome: None,
+        target: None,
     })
 }
 
@@ -318,24 +322,41 @@ impl Running {
         let desired = position - forward * back + up * height;
         self.camera = self.camera.lerp(desired, (dt * 5.0).min(1.0));
 
+        // The world is drawn at the height the MIDlet drew it at and scaled up,
+        // because the artwork was made for that: a track tile carries about a
+        // hundred pixels of texture, so on a 720-line window one near tile is
+        // magnified four to eight times and reads as a mosaic of its own texels.
+        // The HUD and the menus stay at the window's own resolution, where text
+        // belongs.
+        let target = self.world_target();
+
+        let mut backdrop = Camera2D::from_display_rect(Rect::new(
+            0.0,
+            0.0,
+            screen_width(),
+            screen_height(),
+        ));
+        backdrop.render_target = Some(target.clone());
+        set_camera(&backdrop);
         // The sky is a 2D backdrop, the way M3G draws a `Background` into the
-        // viewport before the scene, so it belongs under the default (screen)
-        // camera.  Drawing it after `set_camera` would instead drop the whole
-        // image into the world as a 1280x720 quad standing at the origin.
+        // viewport before the scene, so it belongs under a screen camera.
+        // Drawing it after the 3D one would drop the whole image into the world
+        // as a quad standing at the origin instead.
         match &self.sky {
             Some(sky) if settings.background => sky.draw(),
             _ => clear_background(Color::new(0.53, 0.81, 0.92, 1.0)),
         }
 
         let mut camera = Camera3D::default();
+        camera.render_target = Some(target.clone());
         camera.position = self.camera;
         camera.target = position + forward * 3.0 + up * 0.8;
         camera.up = up;
-        camera.fovy = if settings.camera == kora::settings::Camera::Inside {
-            70f32.to_radians()
-        } else {
-            62f32.to_radians()
-        };
+        // The game's own field of view: `bq.a` sets the M3G perspective to a 90
+        // degree vertical FOV for every view.  A narrower one magnifies the near
+        // field far more than the original does - a track tile carries about a
+        // hundred pixels of artwork, and the game drew it at 240 lines.
+        camera.fovy = 90f32.to_radians();
         camera.z_far = settings.visibility.far_plane();
         set_camera(&camera);
 
@@ -359,7 +380,38 @@ impl Running {
                 texture: self.texture.clone(),
             });
         }
+
         set_default_camera();
+        draw_texture_ex(
+            &target.texture,
+            0.0,
+            0.0,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(screen_width(), screen_height())),
+                ..Default::default()
+            },
+        );
+    }
+
+    /// The offscreen the world is drawn into: the window's shape, but 240 lines
+    /// tall, which is what the MIDlet rendered into.  Rebuilt when the window
+    /// changes size, and kept between frames because the sky and the meshes are
+    /// drawn into it every frame.
+    fn world_target(&mut self) -> RenderTarget {
+        let height = 240.0;
+        let width = (screen_width() * height / screen_height()).max(64.0).round();
+        if let Some((target, size)) = &self.target {
+            if size.x == width {
+                return target.clone();
+            }
+        }
+        let target = render_target(width as u32, height as u32);
+        // Smooth, because the point of the small target is to stop the artwork
+        // reading as a grid of blocks; the original's phones had no choice.
+        target.texture.set_filter(FilterMode::Linear);
+        self.target = Some((target.clone(), vec2(width, height)));
+        target
     }
 
     fn draw_hud(&self, now: f64, laps: u32, settings: &Settings) {
