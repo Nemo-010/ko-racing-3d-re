@@ -76,13 +76,3 @@ pub const MODE_KEYS: [&str; 7] = [
 pub fn mode_name(mode: u8) -> &'static str {
     get(MODE_KEYS.get(mode as usize).copied().unwrap_or(MODE_KEYS[6]))
 }
-
-/// Label key for a medal, for the callers that draw one.
-pub fn medal_key(medal: u8) -> &'static str {
-    match medal {
-        crate::progress::GOLD => "medal_gold",
-        crate::progress::SILVER => "medal_silver",
-        crate::progress::BRONZE => "medal_bronze",
-        _ => "medal_none",
-    }
-}

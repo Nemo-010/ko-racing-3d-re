@@ -17,8 +17,7 @@ pub struct CarControl {
 
 const CHASSIS_MASS: f32 = 1100.0;
 
-/// Per-car handling, derived from the four values a `.car` file carries and
-/// any upgrades bought in the garage.
+/// Per-car handling, derived from the four values a `.car` file carries.
 ///
 /// The names come from the game itself: `aq.a(127 + i)` draws them and
 /// `ui/ui.txt` gives those ids as SPEED, ACCELERATION, BRAKING and HANDLING.
@@ -43,8 +42,7 @@ impl Default for Tuning {
 }
 
 impl Tuning {
-    /// `stats` are speed, acceleration, braking and handling, each 1..=6
-    /// before upgrades.  Speed buys top end by lowering drag; acceleration
+    /// `stats` are speed, acceleration, braking and handling, each 1..=6.  Speed buys top end by lowering drag; acceleration
     /// buys engine force; braking buys brake force; handling buys steering
     /// angle and the grip the tyres can use.
     pub fn from_stats(stats: [u8; 4]) -> Tuning {

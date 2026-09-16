@@ -53,7 +53,6 @@ enum Screen {
     Deluxe,
     Quick,
     Cars,
-    Garage,
     Race,
     Paused,
     Results,
@@ -105,7 +104,6 @@ fn start_race(
     dir: &PathBuf,
     event: &RaceEvent,
     car_file: &str,
-    progress: &Progress,
     back: Screen,
 ) -> Option<Running> {
     let mut track = scene::build_themed(dir, resources, &event.map, event.theme);
@@ -116,8 +114,7 @@ fn start_race(
         .and_then(|bytes| kora::format::Car::parse(bytes))?;
     let geometry = scene::build_car(resources, &car_def)?;
     let texture = scene::load_car_texture(resources, &geometry);
-    // Anything bought in the garage changes the car the race is driven in.
-    let tuning = Tuning::from_stats(progress.stats(car_file, car_def.stats));
+    let tuning = Tuning::from_stats(car_def.stats);
 
     let laps = env_number("KORA_LAPS", 99).unwrap_or(event.laps).max(1);
     let opponents = env_number("KORA_OPPONENTS", 7).unwrap_or(event.opponents);
@@ -249,12 +246,13 @@ impl Running {
             let race = &self.races[self.player];
             self.outcome = Some(Outcome {
                 place,
-                medal: progress::medal_for_place(place),
                 gained: 0,
                 total_time: race.finish_time.unwrap_or(0.0),
                 best_lap: race.best,
                 laps,
                 cars: self.world.cars.len(),
+                improved: false,
+                previous_best: None,
             });
             return self.outcome.clone();
         }
@@ -396,7 +394,6 @@ async fn main() {
     // shell and keeps the environment overrides meaningful.
     let mut screen = Screen::Main;
     let mut cursor = 0usize;
-    let mut stat_cursor = 0usize;
     let mut running: Option<Running> = None;
     let mut message = String::new();
 
@@ -412,7 +409,7 @@ async fn main() {
                 .get(progress.car)
                 .map(|car| car.file.clone())
                 .unwrap_or_else(|| "rally.car".to_string());
-            running = start_race(&resources, &dir, &event, &file, &progress, Screen::Quick);
+            running = start_race(&resources, &dir, &event, &file, Screen::Quick);
             if running.is_some() {
                 screen = Screen::Race;
             }
@@ -455,11 +452,6 @@ async fn main() {
                             cursor = progress.car.min(cars.len().saturating_sub(1));
                             screen = Screen::Cars;
                         }
-                        4 => {
-                            cursor = progress.car.min(cars.len().saturating_sub(1));
-                            stat_cursor = 0;
-                            screen = Screen::Garage;
-                        }
                         _ => break,
                     }
                 }
@@ -498,8 +490,7 @@ async fn main() {
                                 .get(progress.car)
                                 .map(|car| car.file.clone())
                                 .unwrap_or_else(|| "rally.car".to_string());
-                            running =
-                                start_race(&resources, &dir, &event, &file, &progress, screen);
+                            running = start_race(&resources, &dir, &event, &file, screen);
                             if running.is_some() {
                                 screen = Screen::Race;
                             } else {
@@ -515,7 +506,7 @@ async fn main() {
                     screen = Screen::Main;
                 } else {
                     cursor = cursor.min(cars.len() - 1);
-                    menu::draw_cars(&cars, &progress, cursor, None, "");
+                    menu::draw_cars(&cars, &progress, cursor);
                     if is_key_pressed(KeyCode::Up) {
                         cursor = cursor.saturating_sub(1);
                     }
@@ -536,64 +527,6 @@ async fn main() {
                 }
             }
 
-            Screen::Garage => {
-                if cars.is_empty() {
-                    screen = Screen::Main;
-                } else {
-                    cursor = cursor.min(cars.len() - 1);
-                    let stat = stat_cursor.min(3);
-                    menu::draw_cars(&cars, &progress, cursor, Some(stat), &message);
-
-                    if is_key_pressed(KeyCode::Up) {
-                        cursor = cursor.saturating_sub(1);
-                    }
-                    if is_key_pressed(KeyCode::Down) {
-                        cursor = (cursor + 1).min(cars.len() - 1);
-                    }
-                    if is_key_pressed(KeyCode::Left) {
-                        stat_cursor = stat.saturating_sub(1);
-                    }
-                    if is_key_pressed(KeyCode::Right) {
-                        stat_cursor = (stat + 1).min(3);
-                    }
-                    if is_key_pressed(KeyCode::Escape) {
-                        cursor = 0;
-                        message.clear();
-                        screen = Screen::Main;
-                    }
-                    if is_key_pressed(KeyCode::Enter) {
-                        let file = cars[cursor].file.clone();
-                        let base = cars[cursor].stats;
-                        let name = cars[cursor].name.clone();
-                        match progress.buy_upgrade(&file, base, stat) {
-                            Some(cost) => {
-                                progress.save(&save_path);
-                                message = labels::format(
-                                    "garage_upgraded",
-                                    &[
-                                        &name,
-                                        &labels::stat_name(stat).to_lowercase(),
-                                        &cost.to_string(),
-                                    ],
-                                );
-                            }
-                            None => {
-                                message = match progress.next_upgrade_cost(&file, base, stat) {
-                                    None => labels::format(
-                                        "garage_max",
-                                        &[labels::stat_name(stat)],
-                                    ),
-                                    Some(cost) => labels::format(
-                                        "garage_poor",
-                                        &[&cost.to_string()],
-                                    ),
-                                };
-                            }
-                        }
-                    }
-                }
-            }
-
             Screen::Race => {
                 let Some(run) = running.as_mut() else {
                     screen = Screen::Main;
@@ -608,14 +541,16 @@ async fn main() {
                     run.draw_world(dt);
                     run.draw_hud(get_time(), laps);
                     if let Some(outcome) = finished {
-                        // Award the medal once, and only for an improvement.
-                        let (medal, gained) =
-                            progress.record(&run.event.key, outcome.place, run.event.award);
+                        // Keep the time if it beats the record, and pay the
+                        // record's award the first time a race is passed.
+                        let result =
+                            progress.record(&run.event.key, outcome.total_time, run.event.award);
                         progress.save(&save_path);
                         if let Some(run) = running.as_mut() {
                             if let Some(outcome) = run.outcome.as_mut() {
-                                outcome.medal = medal;
-                                outcome.gained = gained;
+                                outcome.gained = result.gained;
+                                outcome.improved = result.improved;
+                                outcome.previous_best = result.previous_best;
                             }
                         }
                         screen = Screen::Results;

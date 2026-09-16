@@ -103,7 +103,7 @@ pub struct RaceEvent {
     /// group when there is one.
     pub award: i32,
     pub unlocks: Option<u8>,
-    /// Stable key for saving a medal against this race.
+    /// Stable key for saving a best time against this race.
     pub key: String,
 }
 

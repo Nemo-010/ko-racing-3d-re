@@ -691,39 +691,57 @@ fn cars_climb_the_track_elevation() {
     );
 }
 
-/// Medals and points: a better result pays the difference, a worse one pays
-/// nothing and never downgrades, and both survive a save.
+/// The two things the game keeps per race: the award, paid once, and the best
+/// time, kept whenever it improves.  There are no medals.
 #[test]
-fn medals_and_points_persist() {
+fn points_and_best_times_persist() {
     use kora::progress::Progress;
     let mut progress = Progress::default();
     assert!(progress.open(1), "the first race is open at zero points");
     assert!(!progress.open(9), "a 9-point race is not");
+    assert_eq!(progress.best_time("career:0:0"), None, "no record yet");
 
-    let (medal, gained) = progress.record("career:0:0", 1, 1);
-    assert_eq!((medal, gained), (2, 1), "second place pays the record's award");
+    // First finish: the record is set and the award is paid.
+    let first = progress.record("career:0:0", 71.5, 1);
+    assert!(first.improved && first.previous_best.is_none());
+    assert_eq!(first.gained, 1, "the record's own award, once");
+    assert_eq!(progress.points, 1);
+    assert_eq!(progress.best_time("career:0:0"), Some(71.5));
 
-    let (medal, gained) = progress.record("career:0:0", 0, 1);
-    assert_eq!((medal, gained), (3, 0), "a better medal later pays nothing");
-    assert_eq!(progress.best("career:0:0"), 3, "but is remembered");
+    // A slower run changes nothing.
+    let slower = progress.record("career:0:0", 80.0, 1);
+    assert!(!slower.improved, "a slower run is not a record");
+    assert_eq!(slower.gained, 0, "and a race passed twice pays once");
+    assert_eq!(progress.best_time("career:0:0"), Some(71.5));
+    assert_eq!(progress.points, 1);
 
-    let (medal, gained) = progress.record("career:0:0", 2, 1);
-    assert_eq!((medal, gained), (1, 0), "a worse finish pays nothing and keeps the medal");
-    assert_eq!(progress.best("career:0:0"), 3);
+    // A quicker run sets the record, and still pays nothing.
+    let quicker = progress.record("career:0:0", 66.25, 1);
+    assert!(quicker.improved);
+    assert_eq!(quicker.previous_best, Some(71.5));
+    assert_eq!(progress.best_time("career:0:0"), Some(66.25));
+    assert_eq!(progress.points, 1, "the award is paid once, not per record");
 
-    // Off the podium is not a pass at all.
-    let (medal, gained) = progress.record("career:1:0", 5, 1);
-    assert_eq!((medal, gained), (0, 0), "no medal, no points");
-    assert_eq!(progress.points, 1, "one race passed, one point");
+    // Another race has its own record and its own award.
+    let other = progress.record("career:1:0", 40.0, 2);
+    assert_eq!(other.gained, 2);
+    assert_eq!(progress.points, 3);
+    assert_eq!(progress.best_time("career:1:0"), Some(40.0));
 
     let path = std::env::temp_dir().join("kora-progress-test.txt");
     progress.car = 2;
     progress.save(&path);
-    let loaded = Progress::load(&path);
-    assert_eq!(loaded.points, 1);
+    let mut loaded = Progress::load(&path);
+    assert_eq!(loaded.points, 3);
     assert_eq!(loaded.car, 2);
-    assert_eq!(loaded.best("career:0:0"), 3);
-    assert!(loaded.open(2) && !loaded.open(3));
+    assert_eq!(loaded.best_time("career:0:0"), Some(66.25));
+    assert_eq!(loaded.best_time("career:1:0"), Some(40.0));
+    assert_eq!(
+        loaded.record("career:0:0", 90.0, 1).gained,
+        0,
+        "a race already passed stays passed across a save"
+    );
+    assert!(loaded.open(4) && !loaded.open(5));
     let _ = std::fs::remove_file(&path);
 }
 
@@ -787,12 +805,12 @@ fn career_and_quick_lists_are_built() {
 }
 
 /// Run a whole race to the flag with every car on AI, then score it the way
-/// the results screen does: position, medal, points and a saved total.
+/// the results screen does: position, time, points and a saved record.
 #[test]
 fn a_race_runs_to_the_flag_and_scores() {
     use kora::ai::AiDriver;
     use kora::physics::{CarControl, Tuning, World};
-    use kora::progress::{medal_for_place, Progress};
+    use kora::progress::Progress;
     use kora::race::Race;
 
     let dir = assets();
@@ -858,13 +876,14 @@ fn a_race_runs_to_the_flag_and_scores() {
     // Score the winner exactly as the results screen does.
     let winner = finish_order[0];
     let place = finish_order.iter().position(|&car| car == winner).unwrap();
+    let time = races[winner].finish_time.unwrap();
     let mut progress = Progress::default();
-    let (medal, gained) = progress.record("quick:1.map:0", place, 1);
+    let result = progress.record("quick:1.map:0", time, 1);
     assert_eq!(place, 0);
-    assert_eq!(medal, medal_for_place(0));
-    assert_eq!(medal, 3, "the winner takes gold");
-    assert_eq!(gained, 1, "and is paid the record's own award, once");
+    assert_eq!(result.gained, 1, "the record's own award, once");
     assert_eq!(progress.points, 1);
+    assert!(result.improved, "the first finish is a record");
+    assert_eq!(progress.best_time("quick:1.map:0"), Some(time));
     let race = &races[winner];
     assert!(race.best.is_some() && race.best.unwrap() > 5.0, "laps are timed");
     assert!(race.finish_time.is_some());
@@ -926,72 +945,6 @@ fn the_bundled_font_covers_the_interface() {
     assert!(bitmap.iter().any(|byte| *byte > 0), "A rasterised blank");
 }
 
-/// The garage: prices scale with the stat, purchases are capped, points come
-/// out of the career total and everything survives a save.
-#[test]
-fn the_garage_sells_upgrades_for_career_points() {
-    use kora::progress::{self, Progress, MAX_STAT};
-    let resources = pack::load(&assets());
-    let cars = progress::car_infos(&resources);
-    let rally = cars.iter().find(|car| car.file == "rally.car").unwrap();
-    let base = rally.stats;
-
-    let mut progress = Progress::default();
-    assert_eq!(progress.stats("rally.car", base), base, "nothing bought yet");
-    assert_eq!(
-        progress.buy_upgrade("rally.car", base, 3),
-        None,
-        "no points, no upgrade"
-    );
-
-    progress.points = 100;
-    let before = progress.stats("rally.car", base)[3];
-    let cost = progress.next_upgrade_cost("rally.car", base, 3).unwrap();
-    assert_eq!(cost, progress::upgrade_cost(before));
-    assert_eq!(progress.buy_upgrade("rally.car", base, 3), Some(cost));
-    assert_eq!(progress.stats("rally.car", base)[3], before + 1);
-    assert_eq!(progress.points, 100 - cost);
-    for stat in 0..4 {
-        if stat != 3 {
-            assert_eq!(
-                progress.stats("rally.car", base)[stat],
-                base[stat],
-                "buying one stat must not move the others"
-            );
-        }
-    }
-
-    // Take one stat to the ceiling and it stops there.
-    let mut spent = 0;
-    while let Some(cost) = progress.next_upgrade_cost("rally.car", base, 0) {
-        progress.points = cost;
-        assert!(progress.buy_upgrade("rally.car", base, 0).is_some());
-        spent += cost;
-    }
-    assert_eq!(progress.stats("rally.car", base)[0], MAX_STAT);
-    assert!(spent > 0, "reaching the ceiling should cost something");
-    progress.points = 1000;
-    assert_eq!(
-        progress.buy_upgrade("rally.car", base, 0),
-        None,
-        "the ceiling holds"
-    );
-
-    let path = std::env::temp_dir().join("kora-garage-test.txt");
-    progress.save(&path);
-    let loaded = Progress::load(&path);
-    assert_eq!(loaded.stats("rally.car", base)[0], MAX_STAT);
-    assert_eq!(loaded.stats("rally.car", base)[3], before + 1);
-    assert_eq!(loaded.points, 1000, "saving keeps the balance");
-    let other = cars.iter().find(|car| car.file == "suv.car").unwrap();
-    assert_eq!(
-        loaded.stats(&other.file, other.stats),
-        other.stats,
-        "upgrades are per car"
-    );
-    let _ = std::fs::remove_file(&path);
-}
-
 /// The deluxe levels are a second campaign, opened by career points alone.
 /// The port has no entitlement flag, purchase or server behind them, unlike
 /// the original, which gates them behind an SMS unlock.
@@ -1033,7 +986,7 @@ fn the_deluxe_campaign_opens_on_points_alone() {
 ///
 /// Their names are the game's own - `aq.a(127 + i)` draws them and `ui/ui.txt`
 /// gives those ids - so they are pinned here: a silent change would quietly
-/// relabel the garage.
+/// relabel the setup screen.
 #[test]
 fn car_stats_change_the_handling() {
     use kora::labels;
@@ -1228,10 +1181,6 @@ fn the_label_table_is_well_formed() {
             "events_count",
             "need_points",
             "in_use",
-            "garage_buy",
-            "garage_max",
-            "garage_poor",
-            "garage_upgraded",
             "car_selected",
             "pause_title",
             "pause_resume",
@@ -1240,12 +1189,14 @@ fn the_label_table_is_well_formed() {
             "col_mode",
             "col_laps",
             "col_cpu",
-            "col_medal",
+            "col_best",
             "results_position",
             "results_laps",
             "results_total",
             "results_best",
-            "results_medal",
+            "results_record",
+            "results_new_record",
+            "results_none",
             "results_points",
             "results_continue",
             "hud_lap",
@@ -1258,7 +1209,6 @@ fn the_label_table_is_well_formed() {
             "keys_menu",
             "keys_events",
             "keys_cars",
-            "keys_garage",
             "keys_race",
             "points",
         ],
@@ -1300,19 +1250,20 @@ fn bonus_races_unlock_rather_than_award() {
         "a bonus race must not also pay points"
     );
 
-    // And a finishing medal on one of them adds nothing.
+    // Finishing one of them keeps a time but pays nothing.
     let bonus = unlockers[0];
     let mut progress = Progress::default();
-    let (medal, gained) = progress.record(&bonus.key, 0, bonus.award);
-    assert_eq!(medal, 3, "still a gold for winning it");
-    assert_eq!(gained, 0, "but it pays no points");
+    let result = progress.record(&bonus.key, 55.0, bonus.award);
+    assert_eq!(result.gained, 0, "a bonus race pays no points");
     assert_eq!(progress.points, 0);
+    assert!(result.improved, "but it still sets a time");
 
     // Whereas an ordinary race pays the record's own value, once.
     let ordinary = awarders[0];
-    let (_, gained) = progress.record(&ordinary.key, 0, ordinary.award);
-    assert_eq!(gained, ordinary.award as u32);
+    let first = progress.record(&ordinary.key, 60.0, ordinary.award);
+    assert_eq!(first.gained, ordinary.award as u32);
     assert_eq!(progress.points, ordinary.award as u32);
-    let (_, again) = progress.record(&ordinary.key, 0, ordinary.award);
-    assert_eq!(again, 0, "passing the same race twice pays once");
+    let again = progress.record(&ordinary.key, 50.0, ordinary.award);
+    assert_eq!(again.gained, 0, "passing the same race twice pays once");
+    assert!(again.improved, "though the quicker run is kept");
 }

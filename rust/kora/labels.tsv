@@ -18,29 +18,23 @@ menu_career	CAREER	54
 menu_deluxe	DELUXE	-
 menu_quick	QUICK RACE	-
 menu_cars	SELECT YOUR CAR	125
-menu_garage	GARAGE	-
 menu_quit	QUIT	3
 keys_menu	ARROWS SELECT   ENTER CONFIRM   ESC BACK	-
 keys_events	ARROWS SELECT   ENTER START   ESC BACK	-
 keys_cars	ARROWS SELECT   ENTER CHOOSE   ESC BACK	-
-keys_garage	UP/DOWN CAR   LEFT/RIGHT STAT   ENTER BUY   ESC BACK	-
 keys_race	ARROWS DRIVE   SPACE BRAKE   ESC PAUSE	-
 events_count	{} of {} events   {} points	-
 col_mode	MODE	-
 col_laps	LAPS	57
 col_cpu	CPU	60
-col_medal	MEDAL	-
+col_best	BEST TIME	71
 need_points	NEED {}	-
 stat_speed	SPEED	127
 stat_acceleration	ACCELERATION	128
 stat_braking	BRAKING	129
 stat_handling	HANDLING	130
-in_use	IN USE	-
-garage_buy	ENTER: {} UPGRADE FOR {}	-
-garage_max	{} IS AT MAXIMUM	-
-garage_poor	NEED {} POINTS FOR THAT UPGRADE	-
-garage_upgraded	{} {} UPGRADED FOR {} POINTS	-
 car_selected	{} SELECTED	-
+in_use	IN USE	-
 pause_title	PAUSED	-
 pause_resume	RESUME	1
 pause_restart	RESTART	48
@@ -56,15 +50,12 @@ results_position	POSITION	164
 results_laps	LAPS	57
 results_total	TOTAL	-
 results_best	BEST LAP	72
-results_medal	MEDAL	-
-points	POINTS	178
+results_record	RECORD:	96
+results_new_record	NEW RECORD!	-
+results_none	NO RECORD YET	177
 results_points	+{}  (total {})	-
-results_unlocks	UNLOCKS A BONUS RACE	-
 results_continue	CONTINUE	63
-medal_gold	GOLD	-
-medal_silver	SILVER	-
-medal_bronze	BRONZE	-
-medal_none	-	-
+points	POINTS	178
 hud_lap	LAP {}/{}	162
 hud_pos	POS {}/{}	164
 hud_time	TIME {}	-

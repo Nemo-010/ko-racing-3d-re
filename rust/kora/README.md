@@ -24,7 +24,7 @@ cargo test --release                     # headless checks
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `KORA_ASSETS` | `assets` | directory holding `data`, `data.*` and `lists/` |
-| `KORA_SAVE` | `kora-save.txt` | where career points and medals are kept |
+| `KORA_SAVE` | `kora-save.txt` | where points, best times and the chosen car are kept |
 | `KORA_SKIP_MENU` | unset | set to boot straight into a race |
 | `KORA_MAP` | `1.map` | track for `KORA_SKIP_MENU` (any of the 40) |
 | `KORA_CAR` | `cars/rally.car` | car to select at startup |
@@ -73,20 +73,25 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
   which is what the MIDlet does every frame and what lets a car cross the steps
   between two tiles instead of being trapped by them.
 * **Menus** (`menu`) - main menu, the career event list, the deluxe list, a
-  quick-race list of all 40 tracks, car selection, the garage, a pause menu and
-  a results panel.  Locked events grey out and show the points they need, and
-  each event carries the game's own name for its mode (CIRCUIT, RACE, TIME
-  CHASE, SURVIVAL, HEAD TO HEAD, SLIDESHOW, SPECIAL).
-* **Career progress** (`progress`) - points and medals.  A race's entry
-  threshold and award come from its `.000` record: the MIDlet keeps a running
-  total, refuses to offer a race whose gate sits above it, and pays the
-  record's own value once when a race is passed and never again.  A *negative*
-  value is not an award at all - `u.n()` negates it into a group index and
-  unlocks that group - and seven bonus races in `campaign.000` carry one, so
-  the port marks those as unlocks and pays nothing rather than a token point.
-  Medals (gold, silver and bronze for the podium) are the port's own: the game
-  has no medal anywhere in its text, and its stated goal is simply FINISH
-  FIRST.  Points, medals and the chosen car save to `KORA_SAVE`.
+  quick-race list of all 40 tracks, car selection with each car's four stat
+  bars, a pause menu and a results panel.  Locked events grey out and show the
+  points they need, each event carries its stored best time, and each shows the
+  game's own name for its mode (CIRCUIT, RACE, TIME CHASE, SURVIVAL, HEAD TO
+  HEAD, SLIDESHOW, SPECIAL).
+* **Career progress** (`progress`) - points and best times, which is the pair
+  the game keeps.  A race's entry threshold and award come from its `.000`
+  record: the MIDlet holds a running total, refuses to offer a race whose gate
+  sits above it, and pays the record's own value once when a race is passed and
+  never again.  A *negative* value is not an award at all - `u.n()` negates it
+  into a group index and unlocks that group - and seven bonus races in
+  `campaign.000` carry one, so the port marks those as unlocks and pays
+  nothing.
+* **Best times** - every finish is timed and the quickest is kept, win or lose,
+  the way `r.c(int)` keeps whichever of the new time and the old one is better
+  and `u.c()` initialises the stored value to `Integer.MAX_VALUE` for "no record
+  yet".  There are no medals: the game has no medal, gold, silver or bronze
+  anywhere in its text, and an earlier version of this port invented them.  The
+  results panel says NEW RECORD with the old time beside it when one falls.
 * **Garage** (`progress` + `menu`) - spend career points on any car's four
   values, up to 6, which is the ceiling the game's own best car carries.  Each
   purchase changes what the car is like to drive, and the upgrades are saved
@@ -99,7 +104,7 @@ and in the menus arrows move, **Enter** confirms and **Esc** goes back.
 fonts/           Contrail One + its OFL licence (bundled via include_bytes)
 labels.tsv       every string the interface draws, with its provenance
 src/pack.rs      resource archive reader
-src/progress.rs  medals, points, car list and the save file
+src/progress.rs  points, best times, car list and the save file
 src/labels.rs    UI text, loaded from labels.tsv
 src/menu.rs      every screen outside the race
 src/format.rs    per-format parsers
@@ -139,12 +144,11 @@ macroquad context.
 | `campaign_themes_still_build` | building a track in theme 3 produces the same collider |
 | `collision_meshes_give_tracks_elevation` | ramps and platforms reach the collider, and the collider matches the runtime height function |
 | `cars_climb_the_track_elevation` | AI cars drive down 1.map's 4.2-unit ramp and back out |
-| `medals_and_points_persist` | medal rules, points only for an improvement, save/load |
+| `points_and_best_times_persist` | the award paid once, the time kept when it improves, save/load |
 | `career_and_quick_lists_are_built` | the 47 career events, the 40 quick-race tracks and the 8 cars |
 | `a_race_runs_to_the_flag_and_scores` | a whole 2-lap race with four AI cars, scored as the results screen does |
 | `bonus_races_unlock_rather_than_award` | the seven negative records are unlocks, pay nothing, and the groups are 1..7 |
 | `the_bundled_font_covers_the_interface` | the bundled face parses, covers every character the UI builds, and rasterises |
-| `the_garage_sells_upgrades_for_career_points` | prices, the ceiling, per-car isolation and the save round trip |
 | `the_deluxe_campaign_opens_on_points_alone` | the 13 deluxe events are extra tracks, opened by points with nothing else consulted |
 | `car_stats_change_the_handling` | each of the four values moves its own part of the tuning |
 | `upgrades_make_a_car_quicker` | a maxed car reaches a higher speed than a stock one |
@@ -184,7 +188,7 @@ key	text	source
 hud_lap	LAP {}/{}	162
 stat_speed	SPEED	127
 mode_time_chase	TIME CHASE	204
-menu_garage	GARAGE	-
+menu_cars	SELECT YOUR CAR	125
 ```
 
 `key` is what the code asks for, `text` is what is drawn, and `source` records
@@ -274,9 +278,10 @@ as-is.
 * the original's own menu *layout*: its labels are read (`ui/ui.txt`, plain
   text) and used where a screen needs one, but the screens themselves are the
   port's, since the MIDlet positions every one of them by hand;
-* the exact original medal rule: the tables give each race an entry threshold
-  and an award, but what *performance* earns the medal is not in them, so the
-  port uses the finishing position;
+* what counts as "passing" a race, which gates the award: the table gives each
+  race an entry threshold and an award but not the finish condition, and the
+  MIDlet's own test is a method this port has not read apart.  A podium finish
+  is the port's stand-in;
 * audio (the referenced `.amr` clips are not shipped in the pack at all) and
   the Bluetooth/Vserv/SMS code paths;
 

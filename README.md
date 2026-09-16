@@ -32,7 +32,7 @@ src/                    126 Java classes decompiled with CFR 0.152
 assets/                 all 668 packed resources, original paths preserved
 assets/obj/             250 meshes converted to Wavefront OBJ
 minimaps/               40 track layouts rendered to PNG
-campaign.tsv            careers: level order, maps, unlock/medal data (generated)
+campaign.tsv            careers: level order, maps, unlock data (generated)
 tools/kora/             dependency-free Python readers + CLI
 tools/README.md         exact byte layouts and Rust-porting notes
 rust/kora/              playable Rust reimplementation (macroquad + rapier3d)
@@ -76,7 +76,7 @@ top-level classes plus a JSON parser in `vParser/`).  Control flow:
 * `m`, `v`, `w`, `dj`, `u` — online tour: leaderboards, tournaments,
   record upload/download over HTTP.
 * `bu extends cu` — Bluetooth multiplayer session (`dh` does JSR-82).
-* `co` — garage/upgrades, `br extends u` — the "deluxe" campaign.
+* `co` — the 3D car viewer, `br extends u` — the "deluxe" campaign.
 * `aq`, `p`, `g`, `dn`, `t`, `f` — bitmap fonts, text layout and UI text.
 * `VservManager` — third-party ad SDK, shipped **unobfuscated**.
 
@@ -145,7 +145,7 @@ Full byte tables are in [`tools/README.md`](tools/README.md). Summary:
   finish and checkpoint coordinates.  All 40 files parse to the exact byte;
   `minimaps/` shows the result.
 * **campaign `.000`** — level list (name, map file, preview coords, mode
-  bitmask, medal thresholds, downloadable extras) and **`.001`** — a pool of
+  bitmask, unlock thresholds, downloadable extras) and **`.001`** — a pool of
   per-race setup blobs addressed by the offsets in the `.000` table.  Each
   game mode stores its blob with its own layout (five in total), which is
   what the offsets' uneven spacing reflects; all 47 records in the two
@@ -220,17 +220,19 @@ a collision world taken from each tile's collision mesh, so ramps and
 platforms are real; a rapier raycast vehicle for the player plus AI opponents
 that follow the road; lap, checkpoint and timing rules; and menus - main menu,
 career event list, quick race, car selection with stat bars, pause and results
-- with a garage that spends career points on car upgrades, and the deluxe
-campaign's 13 extra levels opened by points rather than by the original's SMS
-purchase.  No paywall and no network code of any kind.  On-screen text is set in
+- with the deluxe campaign's 13 extra levels opened by points rather than by the
+original's SMS purchase, career points and per-race best times, and no garage
+or medals, because the original has none.  No paywall and no network code of
+any kind.  On-screen text is set in
 Contrail One (SIL Open Font License, bundled in `rust/kora/fonts/`) and
 rasterised by macroquad, rather than the pack's bitmap fonts, which the tooling
 still decodes.  `cargo test --release`
 runs 19 headless checks, including building all 40 tracks, driving AI round
-four of them, a whole race run to the flag and scored, and the medal rules.
+four of them, a whole race run to the flag and scored, and the point and
+best-time rules.
 
-Not implemented: audio, the Bluetooth/Vserv/SMS code paths, the garage's car
-upgrades and the original's menu artwork.  See
+Not implemented: audio, the Bluetooth/Vserv/SMS code paths, drift scoring and
+the original's menu artwork.  See
 [`rust/kora/README.md`](rust/kora/README.md).
 
 ## Suggested next steps

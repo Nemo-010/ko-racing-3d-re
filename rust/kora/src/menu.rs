@@ -10,17 +10,16 @@ use macroquad::prelude::*;
 
 use crate::campaign::RaceEvent;
 use crate::labels;
-use crate::progress::{CarInfo, Progress, MAX_STAT};
+use crate::progress::{CarInfo, Progress};
 use crate::text;
 
 /// The main menu, shared with `main` so the cursor and the labels agree.
 /// These are label keys rather than text.
-pub const MAIN_ITEMS: [&str; 6] = [
+pub const MAIN_ITEMS: [&str; 5] = [
     "menu_career",
     "menu_deluxe",
     "menu_quick",
     "menu_cars",
-    "menu_garage",
     "menu_quit",
 ];
 
@@ -29,22 +28,6 @@ const PANEL: Color = Color::new(1.0, 1.0, 1.0, 0.06);
 const HIGHLIGHT: Color = Color::new(0.20, 0.45, 0.85, 0.85);
 const LOCKED: Color = Color::new(0.45, 0.45, 0.50, 1.0);
 const ACCENT: Color = Color::new(1.0, 0.85, 0.2, 1.0);
-const GOLD: Color = Color::new(1.0, 0.82, 0.25, 1.0);
-const SILVER: Color = Color::new(0.80, 0.82, 0.86, 1.0);
-const BRONZE: Color = Color::new(0.80, 0.55, 0.30, 1.0);
-
-fn medal_text(medal: u8) -> &'static str {
-    labels::get(labels::medal_key(medal))
-}
-
-fn medal_color(medal: u8) -> Color {
-    match medal {
-        3 => GOLD,
-        2 => SILVER,
-        1 => BRONZE,
-        _ => LOCKED,
-    }
-}
 
 /// A panel behind a menu so the text stays readable over the sky.
 fn panel(rect: Rect) {
@@ -83,7 +66,7 @@ pub fn draw_main(progress: &Progress, cursor: usize) {
     centred(labels::get("keys_menu"), screen_height() - 22.0, 17.0, LOCKED);
 }
 
-/// A scrolling list of races, showing the medal already won and greying out
+/// A scrolling list of races, showing the stored best time and greying out
 /// the ones the player's points have not reached.
 pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, title: &str) {
     centred(title, 12.0, 32.0, WHITE);
@@ -106,8 +89,11 @@ pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, tit
         text::draw_shadow(&event.laps.to_string(), 500.0, y, 20.0, color);
         text::draw_shadow(&event.opponents.to_string(), 545.0, y, 20.0, color);
         if open {
-            let medal = progress.best(&event.key);
-            text::draw_shadow(medal_text(medal), 590.0, y, 20.0, medal_color(medal));
+            let best = progress
+                .best_time(&event.key)
+                .map(format_time)
+                .unwrap_or_else(|| labels::get("no_time").to_string());
+            text::draw_shadow(&best, 590.0, y, 20.0, ACCENT);
         } else {
             text::draw_shadow(
                 &labels::format("need_points", &[&event.threshold.to_string()]),
@@ -122,7 +108,7 @@ pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, tit
     text::draw_shadow(labels::get("col_mode"), 370.0, top - 22.0, 17.0, LOCKED);
     text::draw_shadow(labels::get("col_laps"), 500.0, top - 22.0, 17.0, LOCKED);
     text::draw_shadow(labels::get("col_cpu"), 545.0, top - 22.0, 17.0, LOCKED);
-    text::draw_shadow(labels::get("col_medal"), 590.0, top - 22.0, 17.0, LOCKED);
+    text::draw_shadow(labels::get("col_best"), 590.0, top - 22.0, 17.0, LOCKED);
     text::draw_shadow(
         &labels::format(
             "events_count",
@@ -140,32 +126,12 @@ pub fn draw_events(progress: &Progress, events: &[RaceEvent], cursor: usize, tit
     text::draw_shadow(labels::get("keys_events"), 32.0, screen_height() - 20.0, 15.0, LOCKED);
 }
 
-/// The four stat bars `ba.a(car, stat)` feeds the garage display.
+/// The four stat bars `ba.a(car, stat)` feeds the setup screen.
 ///
-/// One function covers both car selection and the garage: pass `focus` as the
-/// stat index being upgraded to show the highlight and the price, or `None`
-/// for plain selection.  Bars show what the car actually has now, with
-/// anything bought in the garage picked out in gold.
-pub fn draw_cars(
-    cars: &[CarInfo],
-    progress: &Progress,
-    cursor: usize,
-    focus: Option<usize>,
-    message: &str,
-) {
-    let garage = focus.is_some();
-    centred(
-        labels::get(if garage { "menu_garage" } else { "menu_cars" }),
-        12.0,
-        32.0,
-        WHITE,
-    );
-    centred(
-        &labels::format("career_points", &[&progress.points.to_string()]),
-        46.0,
-        17.0,
-        ACCENT,
-    );
+/// The MIDlet draws these as bars beside the car's name when you pick one,
+/// which is all the numbers are for: there is no garage and nothing to buy.
+pub fn draw_cars(cars: &[CarInfo], progress: &Progress, cursor: usize) {
+    centred(labels::get("menu_cars"), 12.0, 32.0, WHITE);
 
     let row = 62.0;
     let top = 82.0;
@@ -185,65 +151,27 @@ pub fn draw_cars(
         if active {
             text::draw_shadow(labels::get("in_use"), 250.0, y + 4.0, 14.0, ACCENT);
         }
-
-        let stats = progress.stats(&car.file, car.stats);
-        for (stat, value) in stats.iter().enumerate() {
+        for (stat, value) in car.stats.iter().enumerate() {
             let by = y + 22.0 + stat as f32 * 9.0;
-            let selected = garage && index == cursor && focus == Some(stat);
-            text::draw_shadow(
-                labels::stat_name(stat),
-                330.0,
-                by,
-                if selected { 14.0 } else { 12.0 },
-                if selected { WHITE } else { LOCKED },
-            );
-            for segment in 0..MAX_STAT {
+            text::draw_shadow(labels::stat_name(stat), 330.0, by, 12.0, LOCKED);
+            for segment in 0..6u8 {
                 let x = 420.0 + segment as f32 * 13.0;
-                let bought = segment >= car.stats[stat];
-                let colour = if segment >= *value {
-                    Color::new(1.0, 1.0, 1.0, 0.12)
-                } else if bought {
-                    ACCENT
-                } else {
-                    Color::new(0.75, 0.80, 0.88, 1.0)
-                };
-                draw_rectangle(x, by + 1.0, 9.0, 7.0, colour);
-            }
-        }
-
-        if garage && index == cursor {
-            match progress.next_upgrade_cost(&car.file, car.stats, focus.unwrap()) {
-                Some(cost) => text::draw_shadow(
-                    &labels::format(
-                        "garage_buy",
-                        &[labels::stat_name(focus.unwrap()), &cost.to_string()],
-                    ),
-                    32.0,
-                    y + row - 16.0,
-                    15.0,
-                    if cost <= progress.points { ACCENT } else { LOCKED },
-                ),
-                None => text::draw_shadow(
-                    &labels::format("garage_max", &[labels::stat_name(focus.unwrap())]),
-                    32.0,
-                    y + row - 16.0,
-                    15.0,
-                    LOCKED,
-                ),
+                draw_rectangle(
+                    x,
+                    by + 1.0,
+                    9.0,
+                    7.0,
+                    if segment < *value {
+                        Color::new(0.75, 0.80, 0.88, 1.0)
+                    } else {
+                        Color::new(1.0, 1.0, 1.0, 0.12)
+                    },
+                );
             }
         }
     }
 
-    if !message.is_empty() {
-        text::draw_shadow(message, 32.0, screen_height() - 46.0, 17.0, WHITE);
-    }
-    text::draw_shadow(
-        labels::get(if garage { "keys_garage" } else { "keys_cars" }),
-        32.0,
-        screen_height() - 22.0,
-        15.0,
-        LOCKED,
-    );
+    text::draw_shadow(labels::get("keys_cars"), 32.0, screen_height() - 22.0, 15.0, LOCKED);
 }
 
 pub fn draw_pause(cursor: usize) {
@@ -265,12 +193,14 @@ pub fn draw_pause(cursor: usize) {
 #[derive(Clone)]
 pub struct Outcome {
     pub place: usize,
-    pub medal: u8,
     pub gained: u32,
     pub total_time: f32,
     pub best_lap: Option<f32>,
     pub laps: u32,
     pub cars: usize,
+    /// Whether this run beat the stored time, and what the record was.
+    pub improved: bool,
+    pub previous_best: Option<f32>,
 }
 
 pub fn draw_results(event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
@@ -299,18 +229,24 @@ pub fn draw_results(event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
             .unwrap_or_else(|| labels::get("no_time").to_string()),
         ACCENT,
     );
-    line(5, labels::get("results_medal"), medal_text(outcome.medal), medal_color(outcome.medal));
+    let record = match (outcome.improved, outcome.previous_best) {
+        (true, Some(previous)) => format!(
+            "{}  (was {})",
+            labels::get("results_new_record"),
+            format_time(previous)
+        ),
+        (true, None) => labels::get("results_new_record").to_string(),
+        (false, Some(best)) => labels::format("results_record", &[&format_time(best)]),
+        (false, None) => labels::get("results_none").to_string(),
+    };
+    line(5, labels::get("results_record"), &record, ACCENT);
     line(
         6,
         labels::get("points"),
-        &if event.unlocks.is_some() {
-            labels::get("results_unlocks").to_string()
-        } else {
-            labels::format(
-                "results_points",
-                &[&outcome.gained.to_string(), &progress.points.to_string()],
-            )
-        },
+        &labels::format(
+            "results_points",
+            &[&outcome.gained.to_string(), &progress.points.to_string()],
+        ),
         ACCENT,
     );
 
