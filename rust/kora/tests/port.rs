@@ -1086,9 +1086,9 @@ fn race_modes_are_named_by_the_game() {
     }
 }
 
-/// And an upgraded car really does go quicker, and still drives a track.
+/// A car with better values really does go quicker, and still drives a track.
 #[test]
-fn upgrades_make_a_car_quicker() {
+fn a_better_car_is_quicker() {
     use kora::physics::{CarControl, Tuning, World};
     let dir = assets();
     let resources = pack::load(&dir);
@@ -1119,11 +1119,11 @@ fn upgrades_make_a_car_quicker() {
         world.speed(0)
     };
 
-    let stock = run(Tuning::from_stats([3, 5, 5, 1]));
-    let maxed = run(Tuning::from_stats([6, 6, 6, 6]));
+    let rally = run(Tuning::from_stats([3, 5, 5, 1]));
+    let best = run(Tuning::from_stats([6, 6, 6, 6]));
     assert!(
-        maxed > stock,
-        "a maxed car should be quicker: {maxed:.2} against {stock:.2}"
+        best > rally,
+        "the best car in the list should be quicker: {best:.2} against {rally:.2}"
     );
 }
 
