@@ -289,7 +289,7 @@ any kind.  On-screen text is set in
 Contrail One (SIL Open Font License, bundled in `rust/kora/fonts/`) and
 rasterised by macroquad, rather than the pack's bitmap fonts, which the tooling
 still decodes.  `cargo test --release`
-runs 43 headless checks, including building all 40 tracks, driving AI round
+runs 44 headless checks, including building all 40 tracks, driving AI round
 four of them, a whole race run to the flag and scored, the point and best-time
 rules, every texture coordinate landing on the right texel, and every career
 race reaching a marker on the map.
@@ -301,6 +301,6 @@ the Bluetooth/Vserv/SMS code paths, and drift scoring.  See
 ## Suggested next steps
 
 1. The original's mid-race HUD extras (rival-position arrows, speedometer,
-   minimap) and the `.bck` sky/background resource.
+   minimap) and the `.bck` sky/background resource - though the sky is in.
 4. Repack support: the pack format is simple enough to write, enabling
    asset swaps or a JAR rebuild.

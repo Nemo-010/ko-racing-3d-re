@@ -88,10 +88,25 @@ pub struct Bar {
 /// `s`: the distance a label comes in from, and how fast.
 const SLIDE: f32 = 180.0;
 const SLIDE_SPEED: f32 = 900.0;
-/// `bg`: the height of the bar along the bottom of the screen.
+/// `bg`: the height of the bar along the bottom of the screen, in the MIDlet's
+/// own 240-high pixels.
 const BAR_HEIGHT: f32 = 28.0;
 /// `y.a(int, int)`: the corner a finger has to be in to be an arrow.
 const ARROW_ZONE: f32 = 70.0;
+/// The height the MIDlet lays its screens out against.  Its bar is 28 pixels of
+/// a 240-high canvas, so on a 720-high window it is 84 - and it has to be
+/// scaled along with the text, or a label grows out of a bar that does not.
+const DESIGN_HEIGHT: f32 = 240.0;
+
+/// How much bigger the window is than the MIDlet's own layout.
+fn ui_scale() -> f32 {
+    (screen_height() / DESIGN_HEIGHT).max(1.0)
+}
+
+/// Where the bar starts, which is also the top of the arrow buttons.
+fn bar_top() -> f32 {
+    screen_height() - BAR_HEIGHT * ui_scale()
+}
 
 impl Bar {
     pub fn new(cursor: usize) -> Bar {
@@ -125,9 +140,11 @@ pub fn bar_menu(
     cursor: &mut usize,
 ) -> Action {
     let dt = get_frame_time();
-    let (width, height) = (screen_width(), screen_height());
+    let width = screen_width();
     let count = MAIN_ITEMS.len();
-    let top = height - BAR_HEIGHT;
+    let scale = ui_scale();
+    let top = bar_top();
+    let (left_zone, right_zone) = (ARROW_ZONE * scale, width - ARROW_ZONE * scale);
 
     let mut chosen = None;
     if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::Up) {
@@ -143,9 +160,9 @@ pub fn bar_menu(
     // for a click and for a tap on a phone.
     if is_mouse_button_pressed(MouseButton::Left) {
         let point = Vec2::from(mouse_position());
-        if point.y > height - ARROW_ZONE && point.x < ARROW_ZONE {
+        if point.y > top && point.x < left_zone {
             *cursor = (*cursor + count - 1) % count;
-        } else if point.y > height - ARROW_ZONE && point.x > width - ARROW_ZONE {
+        } else if point.y > top && point.x > right_zone {
             *cursor = (*cursor + 1) % count;
         } else if point.y > top {
             chosen = Some(*cursor);
@@ -166,7 +183,8 @@ pub fn bar_menu(
     Action::None
 }
 
-/// The logo, the points, and the bar itself.
+/// The logo, the points, and the bar itself: the bar goes down first, then
+/// what sits in it.
 fn draw_frame(
     resources: &Resources,
     bar: &Bar,
@@ -174,8 +192,36 @@ fn draw_frame(
     cursor: usize,
     top: f32,
 ) {
-    let (width, height) = (screen_width(), screen_height());
-    let scale = (height / 240.0).max(1.0);
+    let width = screen_width();
+    let scale = ui_scale();
+    let bar_height = BAR_HEIGHT * scale;
+
+    // `aq.a(Graphics, 0, height - 28, width, 28, 0x999999, 0x666666, true)`, with
+    // the gradient running down the bar and a lighter line along its top.
+    bar_gradient(0.0, top, width, bar_height);
+    draw_line(0.0, top, width, top, scale, theme::BAR_TOP);
+
+    let arrow = 20.0 * scale;
+    let arrow_y = top + (bar_height - arrow) / 2.0;
+    text::draw_shadow("<", 10.0 * scale, arrow_y, arrow, WHITE);
+    text::draw_shadow(
+        ">",
+        width - 10.0 * scale - text::width(">", arrow),
+        arrow_y,
+        arrow,
+        WHITE,
+    );
+
+    let label = labels::get(MAIN_ITEMS[cursor]);
+    let size = 22.0 * scale;
+    let slide = bar.from * bar.offset;
+    text::draw_shadow(
+        &label,
+        width / 2.0 + slide - text::width(&label, size) / 2.0,
+        top + (bar_height - size) / 2.0,
+        size,
+        WHITE,
+    );
 
     // `bd`: the logo sits in the top right corner, drifting up and down.
     let bob = (get_time() as f32 * 0.4).sin() * 2.0 * scale;
@@ -183,7 +229,7 @@ fn draw_frame(
         let size = vec2(logo.width(), logo.height()) * scale;
         draw_texture_ex(
             logo,
-            screen_width() - size.x - 4.0 * scale,
+            width - size.x - 4.0 * scale,
             4.0 * scale + bob,
             WHITE,
             DrawTextureParams {
@@ -200,39 +246,8 @@ fn draw_frame(
         WHITE,
     );
 
-    let label = labels::get(MAIN_ITEMS[cursor]);
-    let size = 22.0 * scale;
-    let slide = bar.from * bar.offset;
-    text::draw_shadow(
-        &label,
-        width / 2.0 + slide - text::width(&label, size) / 2.0,
-        top + (BAR_HEIGHT - size) / 2.0,
-        size,
-        WHITE,
-    );
-
-    // `aq.a(Graphics, 0, height - 28, width, 28, 0x999999, 0x666666, true)`.
-    bar_gradient(0.0, top, width, BAR_HEIGHT);
-    draw_line(0.0, top, width, top, 1.0, theme::BAR_TOP);
-
-    let arrow = 20.0 * scale;
-    text::draw_shadow("<", 10.0 * scale, top + (BAR_HEIGHT - arrow) / 2.0, arrow, WHITE);
-    text::draw_shadow(
-        ">",
-        width - 10.0 * scale - text::width(">", arrow),
-        top + (BAR_HEIGHT - arrow) / 2.0,
-        arrow,
-        WHITE,
-    );
-
     let hint = labels::get("keys_menu");
-    text::draw_shadow(
-        &hint,
-        6.0 * scale,
-        top - 18.0 * scale,
-        13.0 * scale,
-        WHITE,
-    );
+    text::draw_shadow(&hint, 6.0 * scale, top - 18.0 * scale, 13.0 * scale, WHITE);
 }
 
 /// The bar's gradient, line by line, the way `aq.a` draws it.

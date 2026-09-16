@@ -4,10 +4,22 @@
 //! with the tile models transformed into world space on the CPU.  The same
 //! tile triangles are also emitted as a collision trimesh for rapier.
 //!
-//! Coordinate convention: the game is Z-up (`X`, `Y` are the ground plane and
-//! `Z` is height).  macroquad/rapier are Y-up, so every vertex is rotated
-//! -90 degrees about X: `(x, y, z) -> (x, z, -y)`.  That mapping is
-//! orientation-preserving, so triangle winding survives.
+//! Coordinate convention: the game's models put **Z downwards** - `a`, the
+//! collision mesh reader, negates the third component of every triangle it
+//! builds, a tile raises its kerbs to *negative* z, and all twenty car models
+//! stand their wheels on `z = 0` with the body above it.  macroquad/rapier are
+//! Y-up, so the model axes are mapped as
+//!
+//! ```text
+//! (x, y, z) -> (x, -z, -y)
+//! ```
+//!
+//! That mapping reverses orientation, which is why the port's triangles come out
+//! wound the opposite way to the MIDlet's.  The game draws its world with
+//! `PolygonMode.setCulling(160)` (CULL_BACK) and macroquad culls nothing, so the
+//! winding is cosmetic here and the orientation is not: copying z instead of
+//! negating it lays the whole world out mirrored, hanging under the road, with
+//! the cars driving along the underside of the track.
 //!
 //! Geometry building never touches the GPU, so it can be exercised headlessly;
 //! [`Track::attach_textures`] uploads the atlases later, at runtime.
@@ -23,6 +35,15 @@ use rapier3d::prelude::Vector as RVector;
 use crate::format;
 use crate::grid::Grid;
 use crate::pack::{self, Resources};
+
+/// One of the game's vertices, in macroquad's Y-up world.
+///
+/// The game's models have **Z pointing down** - see the module comment - so the
+/// third axis is negated here rather than copied.  `place` rotates each instance
+/// in the game's own ground plane first and hands the result to this.
+pub fn game_to_world(x: f32, y: f32, z: f32) -> Vec3 {
+    vec3(x, -z, -y)
+}
 
 /// How much of a track to build, which is what the MIDlet's graphics detail
 /// setting (`al.d()`) controls.
@@ -368,9 +389,11 @@ impl<'a> Builder<'a> {
                 let gx = v[0] * scale[0];
                 let gy = v[1] * scale[1];
                 let gz = v[2] * scale[2];
+                // The instance's rotation is about the game's up axis, so it is
+                // applied in the game's own plane before the axes are swapped.
                 let rx = gx * cos - gy * sin;
                 let ry = gx * sin + gy * cos;
-                points[k] = vec3(rx + origin[0], gz + origin[2], -(ry + origin[1]));
+                points[k] = game_to_world(rx + origin[0], ry + origin[1], gz + origin[2]);
                 uv[k] = vec2(model.texcoords[i][0], model.texcoords[i][1]);
             }
             geometry.push(points);
@@ -763,6 +786,8 @@ pub fn build_car(res: &Resources, car: &format::Car) -> Option<CarGeometry> {
     // Per-axis squash the MIDlet applies to the rally body.
     let scale = [0.96f32, 0.96, 0.9];
     let (min, max) = model.bounds();
+    // The model stands its wheels on z = 0 and rises above it, so centring the
+    // body on its own origin is what puts the wheels and the roof either side.
     let centre_y = 0.5 * (min[2] + max[2]) * scale[2];
 
     let (mut u0, mut v0) = (f32::MAX, f32::MAX);
@@ -773,7 +798,11 @@ pub fn build_car(res: &Resources, car: &format::Car) -> Option<CarGeometry> {
         let base = vertices.len() as u16;
         for &i in &face {
             let v = model.positions[i];
-            let p = vec3(v[0] * scale[0], v[2] * scale[2] - centre_y, -v[1] * scale[1]);
+            let p = game_to_world(
+                v[0] * scale[0],
+                v[1] * scale[1],
+                v[2] * scale[2] - centre_y,
+            );
             let uv = model.texcoords[i];
             u0 = u0.min(uv[0]);
             u1 = u1.max(uv[0]);

@@ -27,6 +27,10 @@ python3 -m kora unpack x/ assets/
 # convert every custom mesh to Wavefront OBJ
 python3 -m kora obj assets/models assets/obj
 
+# look at a track the Rust port built, without a display
+cd ../rust/kora && cargo run --release --bin dump_track -- assets 1.map /tmp/1.track
+cd ../../tools && python3 -m kora view /tmp/1.track /tmp/1.png
+
 # render the .map track layouts to PNG minimaps
 python3 -m kora mapimg assets/levels minimaps/
 

@@ -182,6 +182,7 @@ src/hud.rs       speedometer and minimap
 src/theme.rs     the ui skin: the MIDlet's palette over macroquad's widgets
 src/text.rs      text drawing, over macroquad's rasteriser
 src/main.rs      macroquad front-end
+src/bin/dump_track.rs   writes a built track to a file, for `kora view`
 tests/port.rs    headless checks
 ```
 
@@ -227,6 +228,8 @@ macroquad context.
 | `the_career_map_walks_west_to_east_and_back` | the arrows reach every marker and never skip one, in both directions |
 | `the_planet_grows_from_a_disc_to_the_whole_view` | the planet is a modest disc at rest and covers the screen when the jump lands |
 | `the_pictures_the_front_end_needs_decode` | the maps, both planet plates and the five sky strips all decode |
+| `the_game_z_axis_points_down` | the models' Z runs downwards: road tiles keep their kerbs above the road and every car stands on its wheels |
+| `every_career_race_has_a_marker_on_the_map`, `the_career_map_walks_west_to_east_and_back` | the career map's markers, and the arrows that walk them |
 
 ## No paywall, no server
 
@@ -444,16 +447,29 @@ a live graphics context, so measuring or drawing a string needs a window.
 
 ## Coordinate conventions
 
-The game is **Z-up**: `X`/`Y` span the ground plane and `Z` is height, and
-tile models are authored to match.  macroquad and rapier are Y-up, so every
-vertex is rotated -90 degrees about X on the way in:
+The game is Z-up on paper, but **its models put Z downwards**, and the port has
+to follow the models rather than the paper.  Three things say so, and all three
+are checked by `the_game_z_axis_points_down`:
+
+* `a`, the collision mesh reader, negates the third component of every triangle
+  it builds, so a *positive* world height comes out of a *negative* z;
+* a road tile keeps its drivable strip at `z = 0` and raises its kerbs to
+  negative z, so those kerbs are only above the road if z runs downwards;
+* all twenty car models stand their wheels on `z = 0` with the whole body above
+  it, which is where a car's origin has to be for the game to sit it on the
+  road.
+
+macroquad and rapier are Y-up, so the axes are swapped *and* the third negated:
 
 ```
-(x, y, z)  ->  (x, z, -y)
+(x, y, z)  ->  (x, -z, -y)
 ```
 
-That mapping is orientation-preserving, so triangle winding and the car's
-forward direction survive.  A tile is `ar.c` = **14** world units across, the
+Copying `z` instead lays the whole world out mirrored - the track hanging under
+the road, the cars driving along its underside, upside down.  The mapping also
+reverses orientation, so the port's triangles come out wound the opposite way
+to the MIDlet's; the game draws with `PolygonMode.setCulling(160)` and macroquad
+culls nothing, so the winding is cosmetic here and the orientation is not.  A tile is `ar.c` = **14** world units across, the
 static node scale the game applies to tile/detail/object models is
 `ar.a` = **7.01**, and one map cell's world position is `cell * 14`.  The car,
 unlike the tiles, is *not* scaled by `ar.a` - it keeps its natural model size.

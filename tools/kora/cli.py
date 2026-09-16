@@ -114,6 +114,29 @@ def cmd_dump(args) -> int:
     return 0
 
 
+def cmd_view(args) -> int:
+    """Render a dump `dump_track` wrote, which is the port's own geometry."""
+    from . import view
+
+    dump = view.load(args.dump, args.pack)
+    parsed = lambda text: tuple(float(part) for part in text.split(","))
+    drawn = view.render(
+        dump,
+        args.out,
+        width=args.width,
+        height=args.height,
+        eye=parsed(args.eye) if args.eye else None,
+        target=parsed(args.look) if args.look else None,
+        fovy=args.fov,
+        textured=not args.flat,
+        cull=args.cull,
+    )
+    print("%d triangles over %d textures -> %s" % (dump.count(), len(drawn), args.out))
+    for name, count in sorted(drawn.items(), key=lambda item: -item[1]):
+        print("   %-24s %5d" % (name, count))
+    return 0
+
+
 def cmd_mapimg(args) -> int:
     import glob as _glob
 
@@ -322,6 +345,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("out", help="output .png or output directory")
     p.add_argument("--scale", type=int, default=12, help="pixels per tile (default 12)")
     p.set_defaults(func=cmd_mapimg)
+
+    p = sub.add_parser("view", help="render a track the port dumped, to a PNG")
+    p.add_argument("dump", help="the file `cargo run --bin dump_track` wrote")
+    p.add_argument("out", help="PNG to write")
+    p.add_argument("--pack", default="../x", help="pack directory, for the textures")
+    p.add_argument("--width", type=int, default=960)
+    p.add_argument("--height", type=int, default=540)
+    p.add_argument("--eye", help="camera position, x,y,z")
+    p.add_argument("--look", help="camera target, x,y,z")
+    p.add_argument("--fov", type=float, help="vertical field of view, degrees")
+    p.add_argument("--flat", action="store_true", help="flat colours, no textures")
+    p.add_argument("--cull", action="store_true", help="drop back faces, as the game does")
+    p.set_defaults(func=cmd_view)
 
     p = sub.add_parser("campaign", help="show a campaign .000 definition")
     p.add_argument("path")

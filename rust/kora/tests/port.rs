@@ -2213,3 +2213,90 @@ fn the_planet_grows_from_a_disc_to_the_whole_view() {
         "the planet only covers {landing:?} of {screen:?} when the jump lands"
     );
 }
+
+/// The game's models have **Z pointing down**, and getting that wrong lays the
+/// whole world out mirrored: the track hangs under the road and the cars drive
+/// along its underside, upside down.  Three things say so, and all three are
+/// checked here, because none of them is obvious from the models alone.
+///
+/// * `a`, the collision mesh reader, negates the third component of every
+///   triangle, so a *positive* world height comes from a *negative* z.
+/// * A road tile keeps its drivable strip at z = 0 and raises its kerbs to
+///   negative z, so those kerbs are only above the road if z runs downwards.
+/// * Every car model stands its wheels on z = 0 with the whole body above it,
+///   which is exactly where a car's origin has to be for the game to place it
+///   on the road.
+#[test]
+fn the_game_z_axis_points_down() {
+    use kora::scene::game_to_world;
+
+    let resources = pack::load(&assets());
+
+    // The straight road tile `s`: a drivable strip 1.2 model units wide down the
+    // middle at z = 0, with the terrain either side raised.
+    let tile = format::Model::parse(&resources["models/p/s"]).expect("tile s parses");
+    let scale = [scene::WORLD_SCALE; 3];
+    let mut road = 0;
+    let mut raised = 0;
+    for vertex in &tile.positions {
+        let world = game_to_world(vertex[0] * scale[0], vertex[1] * scale[1], vertex[2] * scale[2]);
+        if vertex[0].abs() <= 0.65 {
+            assert!(
+                world.y.abs() < 0.05,
+                "the road surface is {:.3} above the ground plane",
+                world.y
+            );
+            road += 1;
+        } else {
+            assert!(
+                world.y > 1.0,
+                "the kerb beside the road is at {:.3}, below it",
+                world.y
+            );
+            raised += 1;
+        }
+    }
+    assert!(road >= 4 && raised >= 6, "{road} road, {raised} raised");
+
+    // Every car: wheels at zero, body above.  Twenty of them, so one model with
+    // an odd origin cannot pass this by itself.
+    let mut cars = 0;
+    for (name, data) in resources.iter() {
+        if !name.starts_with("cars/") || !name.ends_with(".car") {
+            continue;
+        }
+        let car = format::Car::parse(data).unwrap();
+        let Some(model) = resources
+            .get(&format!("models/{}", car.model))
+            .and_then(|bytes| format::Model::parse(bytes))
+        else {
+            continue;
+        };
+        let scale = [0.96, 0.96, 0.9];
+        let mut lowest = f32::MAX;
+        let mut highest = f32::MIN;
+        for vertex in &model.positions {
+            let world = game_to_world(
+                vertex[0] * scale[0],
+                vertex[1] * scale[1],
+                vertex[2] * scale[2],
+            );
+            lowest = lowest.min(world.y);
+            highest = highest.max(world.y);
+        }
+        assert!(
+            lowest > -0.05,
+            "{name}: {} dips {:.3} below the plane its wheels stand on",
+            car.model,
+            lowest
+        );
+        assert!(
+            highest > 0.2,
+            "{name}: {} only rises {:.3} above it",
+            car.model,
+            highest
+        );
+        cars += 1;
+    }
+    assert!(cars >= 20, "expected the whole car set, saw {cars}");
+}

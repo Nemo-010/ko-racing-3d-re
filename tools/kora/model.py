@@ -36,6 +36,13 @@ the last two do the same job for the texture coordinates.  Every strip in
 the shipped assets is 3 vertices long, i.e. a plain triangle; strips longer
 than 3 are still handled correctly on export.
 
+The third component points **down**.  ``a``, the collision mesh reader, negates
+it, a road tile keeps its drivable strip at ``z = 0`` with its kerbs at negative
+z, and every car model stands its wheels on ``z = 0`` with the body above.  So a
+viewer that wants Y-up should map ``(x, y, z) -> (x, -z, -y)``; copying z instead
+hangs the whole world under the road, cars included.  ``python3 -m kora view``
+renders a track the port built and is the quickest way to see it.
+
 The texture coordinates come out centred on zero and often outside 0..1,
 because M3G - like the OpenGL underneath it - wraps a lookup rather than
 clamping it.  They are exported exactly as the mesh stores them, so a viewer
