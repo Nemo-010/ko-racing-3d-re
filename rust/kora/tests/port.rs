@@ -360,10 +360,19 @@ fn opponents_drive_the_track() {
         }
         world.step(1.0 / 60.0, &controls);
         for index in 0..cars {
-            let place = world.position(index);
-            if let Some(height) = surface.height_at(place) {
-                world.lift_to(index, height + geometry.half_extents.y + 0.02);
+            let (place, rotation) = world.pose(index);
+            let heading = rotation * vec3(0.0, 0.0, -1.0);
+            let reach = geometry.half_extents.z + 0.5;
+            let support = surface.support_height(place, heading, reach, place.y, geometry.half_extents.y + 0.02);
+            if let Some(height) = support {
+                world.conform(index, height + geometry.half_extents.y + 0.02);
             }
+            world.upright(
+                index,
+                support
+                    .map(|height| height + geometry.half_extents.y + 0.02)
+                    .unwrap_or(place.y),
+            );
             let place = world.position(index);
             assert!(place.y > -30.0, "car {index} fell off at step {step}");
             travelled[index] += (place - previous[index]).length();
@@ -442,10 +451,19 @@ fn opponents_survive_other_tracks() {
             }
             world.step(1.0 / 60.0, &controls);
             for index in 0..cars {
-                let place = world.position(index);
-                if let Some(height) = surface.height_at(place) {
-                    world.lift_to(index, height + geometry.half_extents.y + 0.02);
+                let (place, rotation) = world.pose(index);
+                let heading = rotation * vec3(0.0, 0.0, -1.0);
+                let reach = geometry.half_extents.z + 0.5;
+                let support = surface.support_height(place, heading, reach, place.y, geometry.half_extents.y + 0.02);
+                if let Some(height) = support {
+                    world.conform(index, height + geometry.half_extents.y + 0.02);
                 }
+                world.upright(
+                    index,
+                    support
+                        .map(|height| height + geometry.half_extents.y + 0.02)
+                        .unwrap_or(place.y),
+                );
                 let place = world.position(index);
                 assert!(
                     place.y > -20.0,
@@ -583,8 +601,8 @@ fn collision_meshes_give_tracks_elevation() {
     let dir = assets();
     let resources = pack::load(&dir);
 
-    // 1.map uses h1.tl, a ramp whose collision mesh drops 4.2 units, and
-    // ma1.map uses vl.tl, a platform raised 0.7 above the road plane.
+    // 1.map uses h1.tl, a ramp whose collision mesh rises 4.2 units, and
+    // ma1.map uses vl.tl, a dip sunk 0.7 below the road plane.
     let hills = scene::build(&dir, &resources, "1.map");
     let span = |track: &scene::Track| {
         track
@@ -594,21 +612,21 @@ fn collision_meshes_give_tracks_elevation() {
             .fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)))
     };
     let (low, high) = span(&hills);
-    assert!(low <= -4.1, "1.map should drop to about -4.2, got {low:.2}");
-    assert!(high.abs() < 0.1, "1.map should not rise, got {high:.2}");
+    assert!(high >= 4.1, "1.map should rise to about +4.2, got {high:.2}");
+    assert!(low.abs() < 0.1, "1.map should not dip, got {low:.2}");
 
     // Values straight from the collision meshes, cross-checked against the
     // Python decoder: a ramp mid-point, a kerb, and a plain road tile.
     let height = |x: i32, y: i32| hills.surface.height_at(hills.grid.center(x, y));
-    assert!((height(4, 7).unwrap() + 2.1).abs() < 0.01, "ramp midpoint");
-    assert!((height(2, 2).unwrap() + 0.70).abs() < 0.01, "kerb");
+    assert!((height(4, 7).unwrap() - 2.1).abs() < 0.01, "ramp midpoint");
+    assert!((height(2, 2).unwrap() - 0.70).abs() < 0.01, "kerb");
     assert!(height(2, 6).unwrap().abs() < 0.01, "plain road tile is flat");
     assert_eq!(height(0, 0), None, "off-track cells have no surface");
 
     let raised = scene::build(&dir, &resources, "ma1.map");
-    let (_, top) = span(&raised);
-    assert!(top >= 0.6, "ma1.map should be raised, got {top:.2}");
-    assert!(raised.collision_vertices.iter().any(|v| v.y > 0.5));
+    let (bottom, _) = span(&raised);
+    assert!(bottom <= -0.6, "ma1.map should dip, got {bottom:.2}");
+    assert!(raised.collision_vertices.iter().any(|v| v.y < -0.5));
 
     // The collider must be the height function the runtime queries: every cell
     // whose tile ships a mesh has a grid vertex at its centre, and that vertex
@@ -668,7 +686,7 @@ fn cars_climb_the_track_elevation() {
     let cars = world.cars.len();
     let ride = geometry.half_extents.y + 0.02;
     let mut drivers: Vec<AiDriver> = (0..cars).map(|_| AiDriver::new(1.0)).collect();
-    let mut lowest = f32::MAX;
+    let mut highest = f32::MIN;
 
     for _ in 0..(60 * 60) {
         let mut controls = vec![CarControl::default(); cars];
@@ -680,16 +698,23 @@ fn cars_climb_the_track_elevation() {
         }
         world.step(1.0 / 60.0, &controls);
         for index in 0..cars {
-            let position = world.position(index);
-            if let Some(height) = surface.height_at(position) {
-                world.lift_to(index, height + ride);
+            let (position, rotation) = world.pose(index);
+            let heading = rotation * vec3(0.0, 0.0, -1.0);
+            let reach = geometry.half_extents.z + 0.5;
+            let support = surface.support_height(position, heading, reach, position.y, ride);
+            if let Some(height) = support {
+                world.conform(index, height + ride);
             }
-            lowest = lowest.min(world.position(index).y);
+            world.upright(
+                index,
+                support.map(|height| height + ride).unwrap_or(position.y),
+            );
+            highest = highest.max(world.position(index).y);
         }
     }
     assert!(
-        lowest < -1.0,
-        "the cars never went down the ramp (lowest {lowest:.2})"
+        highest > 1.0,
+        "the cars never climbed the ramp (highest {highest:.2})"
     );
 }
 
@@ -850,10 +875,17 @@ fn a_race_runs_to_the_flag_and_scores() {
         }
         world.step(1.0 / 60.0, &controls);
         for index in 0..cars {
-            let place = world.position(index);
-            if let Some(height) = surface.height_at(place) {
-                world.lift_to(index, height + ride);
+            let (place, rotation) = world.pose(index);
+            let heading = rotation * vec3(0.0, 0.0, -1.0);
+            let reach = geometry.half_extents.z + 0.5;
+            let support = surface.support_height(place, heading, reach, place.y, ride);
+            if let Some(height) = support {
+                world.conform(index, height + ride);
             }
+            world.upright(
+                index,
+                support.map(|height| height + ride).unwrap_or(place.y),
+            );
         }
         let now = step as f64 / 60.0;
         for index in 0..cars {

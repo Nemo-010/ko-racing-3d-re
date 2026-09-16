@@ -138,6 +138,47 @@ impl SurfaceGrid {
         );
         Some(surface_height(collision.as_ref(), *arg, local))
     }
+
+    /// The height the runtime holds a car to: the surface under its centre,
+    /// or under its nose when that is higher and the car is up for climbing.
+    ///
+    /// The MIDlet sets its car's height from the collision mesh every frame,
+    /// so a step between two tiles is something it climbs rather than a wall
+    /// - the foot of the `h1` ramp is a 4.2-unit step.  A physics chassis
+    /// meets that step nose-first while its centre is still on the lower
+    /// tile, where `height_at` reports the low side and no lift happens, so
+    /// it would grind there forever.  Sampling the nose too reproduces the
+    /// original behaviour: steps are climbed, while a car in the air (surface
+    /// below on both samples) is left alone, so jumps still work.
+    ///
+    /// A car buried *under* the centre surface - spawned into a slope, or
+    /// fallen into a step - comes straight up level via the centre sample.
+    /// Teleporting that case to the higher nose sample instead would stand
+    /// the body on its nose, past what the suspension can take, and wedge it.
+    ///
+    /// The nose lead is capped at what the suspension can follow in one
+    /// frame.  An uncapped nose suspends a climbing car above its own wheels:
+    /// every pop puts the body past the (high) nose sample while the wheels
+    /// dangle short of the surface, so it never gets traction and stalls
+    /// mid-ramp.  Capped, the car walks up steps progressively and stays in
+    /// contact; a 4.2-unit ramp foot still climbs in a third of a second.
+    pub fn support_height(
+        &self,
+        position: Vec3,
+        heading: Vec3,
+        reach: f32,
+        body_y: f32,
+        ride: f32,
+    ) -> Option<f32> {
+        let centre = self.height_at(position)?;
+        if body_y < centre + ride {
+            return Some(centre);
+        }
+        let nose = position + vec3(heading.x, 0.0, heading.z).normalize_or_zero() * reach;
+        const LEAD: f32 = 0.2;
+        let nose = self.height_at(nose).unwrap_or(f32::MIN).min(centre + LEAD);
+        Some(centre.max(nose))
+    }
 }
 
 /// Turns a lookup that should wrap into one that can be clamped, since a
@@ -305,23 +346,16 @@ fn rotate_sample(point: Vec2, arg: u8) -> Vec2 {
 /// The game's height function: the interpolated collision mesh height in world
 /// units, or zero when the tile has no mesh or the point falls outside it.
 ///
-/// **This sign is wrong, and it is left alone on purpose.**  The MIDlet negates
-/// the third component when it builds each triangle (`a`), because its world has
-/// Z pointing down, and this port already maps that world to Y-up once - so the
-/// right height is `+z * TILE`, not `-z * TILE`.  Every one of the 26 tiles that
-/// ship a collision mesh agrees: with the sign flipped, a tile whose model
-/// raises a 4.2-unit barrier reports `+4.2`, where the model's kerbs and walls
-/// are (see the table in `the_game_z_axis_points_down`).
-///
-/// Flipping it here breaks the driving, for a reason worth writing down: the
-/// negation also *buries* the edge barriers this port builds for itself, since
-/// those are placed at `height_at` too, and it turns the map's own wall tiles
-/// into 4.2-unit pits the cars drop into harmlessly.  Between them the two
-/// mistakes cancelled, and the port has never actually collided with a wall.
-/// Correcting the sign therefore needs the barrier placement and the AI
-/// re-checked against real walls in the same change - work that wants a pair of
-/// eyes on it, not a blind flip.  Until then the cars sink into a kerb when they
-/// cut a corner, and every ramp in the port is inside out.
+/// The MIDlet negates the third component when it builds each triangle (`a` -
+/// three `fneg`s in its constructor), so the height in the game's own Z-down
+/// world is `-z * 14`.  This port maps that world to Y-up in `game_to_world`
+/// by negating the axis once more, so the height here is `+z * TILE`.  Using
+/// the game's formula raw mirrors every nonzero height about the road plane:
+/// ramps become pits and kerbs become slots, which is how cars ended up driving
+/// underneath elevated track (the `h1` ramp's visual top sits at +4.2 while the
+/// unflipped sampler reports -4.2; `b1`'s kerb visuals run 0..+1.4; the `vl`
+/// dip's visuals run -0.69..0.03).  The barriers this port builds place
+/// themselves with `height_at` too, so they stand on the true surface with it.
 pub fn surface_height(collision: Option<&format::Collision>, arg: u8, local: Vec2) -> f32 {
     let Some(collision) = collision else {
         return 0.0;
@@ -343,10 +377,9 @@ pub fn surface_height(collision: Option<&format::Collision>, arg: u8, local: Vec
         let u = ((b[1] - c[1]) * (point.x - c[0]) + (c[0] - b[0]) * (point.y - c[1])) / determinant;
         let v = ((c[1] - a[1]) * (point.x - c[0]) + (a[0] - c[0]) * (point.y - c[1])) / determinant;
         if u >= -1e-6 && v >= -1e-6 && u + v <= 1.0 + 1e-6 {
-            // The mesh shares the tile's 14-unit scale.  The sign here is wrong
-            // - see the note on this function - and is kept until the barriers
-            // and the AI can be corrected with it.
-            return -(u * a[2] + v * b[2] + (1.0 - u - v) * c[2]) * TILE;
+            // The mesh shares the tile's 14-unit scale, and the sign is the
+            // port's Y-up one: see the note on this function.
+            return (u * a[2] + v * b[2] + (1.0 - u - v) * c[2]) * TILE;
         }
     }
     0.0
@@ -719,7 +752,7 @@ pub fn build_detailed(
     // cell whose tile carries a mesh, a flat quad otherwise.  A mesh can cover
     // only part of its cell, so sampling it on a grid gives one surface rather
     // than overlapping sheets.  Steps between neighbouring cells are left as
-    // they are and the car is lifted onto the surface (see `World::lift_to`),
+    // they are and the car is lifted onto the surface (see `World::conform`),
     // which is how the MIDlet drives its own car over them.
     let mut collision_vertices: Vec<RVector> = Vec::new();
     let mut collision_indices: Vec<[u32; 3]> = Vec::new();
@@ -778,21 +811,37 @@ pub fn build_detailed(
         }
 
         // A barrier on every side that is not drivable, standing on the
-        // surface rather than at zero.
+        // surface rather than at zero.  Sloped cells sample the whole edge:
+        // a barrier at the midpoint height floats above the low end of a ramp
+        // and cars slip under it, so the wall runs from the edge's lowest
+        // surface point to 2.2 above its highest.
+        //
+        // Sides facing off the map get a barrier even when the tile calls
+        // them open: beyond is the void past the world edge, and driving out
+        // there is falling out of the world, not racing.  (The game rejoins
+        // fallers; the port keeps them in to begin with.)
         for dir in 0..4 {
-            if grid.open_sides(x, y) & (1 << dir) != 0 {
+            let (dx, dy) = crate::grid::DIRS[dir];
+            let (nx, ny) = (x + dx, y + dy);
+            let off_map = nx < 0 || ny < 0 || nx >= grid.width || ny >= grid.height;
+            if grid.open_sides(x, y) & (1 << dir) != 0 && !off_map {
                 continue;
             }
-            let ground = surface_height(
-                mesh,
-                arg,
-                match dir {
-                    0 => vec2(1.0, 0.5),
-                    1 => vec2(0.5, 0.0),
-                    2 => vec2(0.0, 0.5),
-                    _ => vec2(0.5, 1.0),
-                },
-            );
+            let edge = match dir {
+                0 => [vec2(1.0, 0.0), vec2(1.0, 0.5), vec2(1.0, 1.0)],
+                1 => [vec2(0.0, 0.0), vec2(0.5, 0.0), vec2(1.0, 0.0)],
+                2 => [vec2(0.0, 0.0), vec2(0.0, 0.5), vec2(0.0, 1.0)],
+                _ => [vec2(0.0, 1.0), vec2(0.5, 1.0), vec2(1.0, 1.0)],
+            };
+            let base = edge
+                .iter()
+                .map(|sample| surface_height(mesh, arg, *sample))
+                .fold(f32::MAX, f32::min);
+            let top = edge
+                .iter()
+                .map(|sample| surface_height(mesh, arg, *sample))
+                .fold(f32::MIN, f32::max)
+                + 2.2;
             let direction = crate::grid::dir_mq(dir);
             let (hx, hz) = if dir % 2 == 0 {
                 (0.6, half_tile)
@@ -800,8 +849,8 @@ pub fn build_detailed(
                 (half_tile, 0.6)
             };
             walls.push((
-                centre + direction * half_tile + vec3(0.0, ground, 0.0),
-                vec3(hx, 1.1, hz),
+                centre + direction * half_tile + vec3(0.0, base, 0.0),
+                vec3(hx, (top - base) / 2.0, hz),
             ));
         }
     }

@@ -134,7 +134,14 @@ impl World {
                 .can_sleep(false),
             ColliderBuilder::cuboid(half.x, half.y, half.z)
                 .mass(CHASSIS_MASS)
-                .friction(tuning.friction),
+                // Deliberately slippery: the tyres (see `wheel_tuning` and the
+                // controller's friction) carry all the grip, while the body
+                // itself must glance off barriers and other cars instead of
+                // grinding to a halt against them.  The game drives its cars
+                // kinematically and never beaches one, so a body that welds
+                // itself to every wall it touches is strictly less faithful -
+                // and a peloton of mutually grinding opponents never laps.
+                .friction(0.2),
         );
 
         let mut controller = DynamicRayCastVehicleController::new(body);
@@ -223,19 +230,63 @@ impl World {
         body.set_angvel(Vector::ZERO, true);
     }
 
-    /// Lift a car back onto the road surface if it has sunk below it.
+    /// Right a car that has ended up on its side or roof, and reseat it on
+    /// the surface.  Returns true when it intervened.
+    ///
+    /// The MIDlet drives its car kinematically, so turtling is not a state the
+    /// game has: a car that lands upside down off a crest, or gets beached
+    /// sideways on a kerb, would otherwise sit there spinning its wheels until
+    /// the race ends.  Only slow cars are touched, so a car that is still
+    /// tumbling through the air is left alone; `height` is the surface below
+    /// it (see `support_height`), or any fallback when there is none.
+    pub fn upright(&mut self, car: usize, height: f32) -> bool {
+        let body = &self.physics.bodies[self.cars[car].body];
+        let up = body.rotation() * Vector::Y;
+        if up.y >= 0.5 || body.linvel().length() >= 2.0 {
+            return false;
+        }
+        let forward = body.rotation() * -Vector::Z;
+        let yaw = (-forward.x).atan2(-forward.z);
+        let body = &mut self.physics.bodies[self.cars[car].body];
+        let y = body.translation().y.max(height);
+        let position = Vector::new(body.translation().x, y, body.translation().z);
+        body.set_translation(position, true);
+        body.set_rotation(Rotation::from_rotation_y(yaw), true);
+        body.set_angvel(Vector::ZERO, true);
+        true
+    }
+
+    /// Hold a car to the road surface it is roughly on when it has sunk
+    /// below it.
     ///
     /// The MIDlet drives its car kinematically: every frame it *sets* the
     /// height from the track's collision mesh, so a step between two tiles is
     /// something it climbs rather than a wall.  A physics chassis has no such
-    /// luxury, so once a step has been hit the car would be trapped against
-    /// it.  Raising the body to the surface (and dropping any downward
-    /// velocity) reproduces the original behaviour without giving up contact
-    /// for the wheels.  A car in the air is left alone, so jumps still work.
-    pub fn lift_to(&mut self, car: usize, height: f32) {
+    /// luxury, so without help it grinds against steps.  Raising the body to
+    /// the surface (and dropping any downward velocity) reproduces the
+    /// original behaviour without giving up contact for the wheels.  A car in
+    /// the air is left alone, so jumps and falls off the world still work.
+    ///
+    /// Deliberately one-sided: snapping a body that is *above* the surface
+    /// down to it suspends cars past cliff edges, where the nearest-cell
+    /// lookup still reports the old cell and the nose still sees it from
+    /// behind - the car then hovers there forever instead of falling onto the
+    /// road below.
+    ///
+    /// The lift has a dead zone underneath: it only fires when the body is
+    /// more than a suspension travel below where it belongs.  Pinning the body
+    /// at exactly ride height every frame holds the wheels dangling just short
+    /// of the surface with no load on them, and the car hangs there forever -
+    /// which is what a car teleported onto a slope (a grid slot on a ramp,
+    /// say) does without it.  Inside the band the suspension rules, so the car
+    /// settles onto its wheels and drives.
+    pub fn conform(&mut self, car: usize, height: f32) {
+        // Wider than the suspension travel (0.25), so a car resting on its
+        // wheels never trips the lift; narrower than any real step.
+        const BELOW: f32 = 0.3;
         let body = &mut self.physics.bodies[self.cars[car].body];
         let translation = body.translation();
-        if translation.y >= height {
+        if translation.y >= height - BELOW {
             return;
         }
         body.set_translation(Vector::new(translation.x, height, translation.z), true);

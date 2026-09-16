@@ -279,17 +279,23 @@ impl Running {
         }
 
         let ride = self.geometry.half_extents.y + 0.02;
+        let reach = self.geometry.half_extents.z + 0.5;
         for index in 0..self.world.cars.len() {
-            let place = self.world.position(index);
+            let (place, rotation) = self.world.pose(index);
             if place.y < -40.0 {
                 self.world.reset(index);
                 continue;
             }
             // The MIDlet sets its car's height from the track's collision mesh
             // every frame, which is how it crosses the steps between tiles.
-            if let Some(height) = self.track.surface.height_at(place) {
-                self.world.lift_to(index, height + ride);
+            let heading = rotation * vec3(0.0, 0.0, -1.0);
+            let support = self.track.surface.support_height(place, heading, reach, place.y, ride);
+            if let Some(height) = support {
+                self.world.conform(index, height + ride);
             }
+            // ...and it never turtles, so a car that does is stood back up.
+            self.world
+                .upright(index, support.map(|height| height + ride).unwrap_or(place.y));
         }
 
         let now = get_time();
