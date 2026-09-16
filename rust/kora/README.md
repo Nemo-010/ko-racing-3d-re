@@ -491,6 +491,21 @@ static node scale the game applies to tile/detail/object models is
 unlike the tiles, is *not* scaled by `ar.a` - it keeps its natural model size.
 Direction indices match the MIDlet: 0 = +X, 1 = -Y, 2 = -X, 3 = +Y.
 
+### Filtering
+
+The game asks for **nearest** texel filtering: `cf.a(string, al.d, ...)` passes
+`al.d`, and `al.d` is 210, which is M3G's `FILTER_NEAREST` (208 is
+`FILTER_BASE_LEVEL`, 209 `FILTER_LINEAR`).  This is not cosmetic.  Both the tile
+atlas and the car sheet are patchworks of artwork that sits edge to edge, so
+linear filtering blends each piece into its neighbours along every boundary:
+grass creeps over the road, the road's paint lands beside it, and one car panel
+bleeds into the next.  Geometry and mapping can be perfectly right and the
+result still looks like scrambled texture coordinates.
+
+Anything judging the look must therefore sample nearest - `python3 -m kora
+view` does - and must not be surprised when that looks blockier than a filtered
+build: blocky is what the game is.
+
 ### Textures
 
 M3G measures texture coordinates from the **top left** of the image with `v`

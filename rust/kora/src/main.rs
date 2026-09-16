@@ -409,7 +409,20 @@ impl Running {
                 return target.clone();
             }
         }
-        let target = render_target(width as u32, height as u32);
+        // `render_target` is documented as a render target with **no depth
+        // buffer**, and this one needs one: without depth testing every
+        // triangle is painted in submission order, so a car's far side and its
+        // own interior show through its near side - "four wheels a side" - and
+        // the inside of every track slab shows through the road it is made of.
+        // The game has a depth buffer; so does this now.
+        let target = render_target_ex(
+            width as u32,
+            height as u32,
+            RenderTargetParams {
+                sample_count: 1,
+                depth: true,
+            },
+        );
         // Smooth, because the point of the small target is to stop the artwork
         // reading as a grid of blocks; the original's phones had no choice.
         target.texture.set_filter(FilterMode::Linear);
