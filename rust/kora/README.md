@@ -589,3 +589,13 @@ exist because the coordinates are the game's own, byte for byte (`at.java`),
 and the whole-track renders agree, yet a side-by-side with the original still
 looks slightly off; a value found by eye turns that into an offset to check
 against the models.  Unset, nothing is changed.
+
+### A note on the viewer's filtering
+
+`python3 -m kora view` samples textures with **nearest** neighbour, which is
+right for reading geometry and wrong for judging how the game looks: at the
+magnification the near field gets, it turns smooth artwork into a mosaic of its
+own texels, and that is a mistake this investigation made more than once.  The
+port and the game both filter linearly (`setFiltering(208, 209)`), because a
+tile carries about a hundred pixels of artwork at 240 lines.  Judge the look in
+the game, not in the viewer.
