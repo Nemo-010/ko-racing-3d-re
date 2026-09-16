@@ -287,8 +287,9 @@ class Collision:
     The local frame is the cell's ``[0,1]^2`` square.  ``bm.a(float, float)``
     rotates a sample point by the cell's ``.map`` argument before the mesh is
     queried, and the third component is *negated* when the triangle is built,
-    so a point's world height is ``-z * 14`` (the same 14-unit scale the ``.tl``
-    heights use).
+    so a point's height in the game's Z-down world is ``-z * 14`` (the same
+    14-unit scale the ``.tl`` heights use).  The Rust port is Y-up and negates
+    once more, reporting ``+z * 14`` - see ``scene::surface_height``.
 
     Vertex components are bytes divided by 100, and anything above 2.0 wraps to
     ``value - 2.56``, which only ever fires on the top of the byte range.  A

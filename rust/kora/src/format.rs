@@ -179,8 +179,10 @@ impl Model {
 /// 2.0 by -2.56, which only ever fires for the top of the byte range.  The
 /// local frame is the same `[0,1]^2` square `bm.a(float, float)` rotates a
 /// sample point into, and the third component is *negated* when the triangle
-/// is built, so world height is `-z * TILE` (14).  A zero vertex count ends
-/// the stream with no triangle list at all.
+/// is built, so the height in the game's Z-down world is `-z * 14` (14 is the
+/// tile edge).  This port is Y-up, so it negates once more: see
+/// `scene::surface_height`, which reports `+z * TILE`.  A zero vertex count
+/// ends the stream with no triangle list at all.
 #[derive(Clone)]
 pub struct Collision {
     pub vertices: Vec<[f32; 3]>,

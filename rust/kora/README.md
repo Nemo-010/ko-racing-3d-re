@@ -547,12 +547,24 @@ as-is.
 
 ## Physics notes
 
-* The road collider is **flat quads at `y = 0`**, plus a barrier on every
-  closed side.  The MIDlet samples each tile's collision mesh for height and
-  falls back to a flat plane when there is none - and most tiles ship no
-  collision data (`s.tl` and friends).  Baking the *visual* triangles instead
-  leaves gaps where cars drop through, which is exactly what happened before
-  the switch.
+* The road collider is a subdivided patch per cell following the collision
+  height function (`scene::surface_height`), flat at `y = 0` where a tile
+  ships no mesh - and most ship none (`s.tl` and friends).  The MIDlet samples
+  each tile's collision mesh for height and falls back to a flat plane when
+  there is none.  Baking the *visual* triangles instead leaves gaps where
+  cars drop through, which is exactly what happened before the switch.
+* Edge barriers stand on closed sides, sealed from each edge's lowest surface
+  point to 2.2 above its highest so sloped cells are closed along the whole
+  edge, plus invisible walls on sides facing off the map (beyond is the void
+  past the world edge, not racing).  The game itself only rejoins fallers.
+* The runtime holds each car to the surface (`support_height` + `conform`):
+  the nose sample climbs steps the centre has not reached yet, capped at what
+  the suspension can follow, and a deadband keeps the lift from pinning a
+  settled car.  A car that turtles anyway is stood back up (`upright`) - the
+  MIDlet drives kinematically and has no upside-down state to be faithful to.
+* The chassis is deliberately slippery (friction 0.2): all grip lives in the
+  tyres, while the body glances off barriers and other cars instead of
+  grinding to a halt against them.
 * Wheel connection points must start **above** the road: a connection at the
   chassis floor puts the suspension ray under the trimesh and no wheel ever
   reports contact.
@@ -560,25 +572,19 @@ as-is.
   Equilibrium compression is `g / (4 * stiffness)` regardless of mass, so a
   car half a unit tall needs stiffness ~24 or the chassis drags on the road.
 
-## Known wrong: the collision height's sign
+## Fixed: the collision height's sign
 
-`scene::surface_height` reads `-z * 14` where it should read `+z * 14`, and the
-note on that function explains why it is left alone for now.  The MIDlet's `a`
-negates the third component of every collision triangle because its own world
-has Z pointing down, and this port maps that world to Y-up once, in
-`game_to_world` - so the negation must not be repeated.  All 26 tiles that ship
-a collision mesh agree: a tile whose model raises a 4.2-unit wall reports
-`+4.2`, and a sunken one (`vl`) reports `-0.7`, matching its model to the
-hundredth.
-
-Flipping it looks like a one-character change and is not.  The same negation
-also *buries* the edge barriers this port builds for itself, which are placed at
-`height_at` too, and it turns the map's own wall tiles into pits the cars drop
-into harmlessly: between them the two mistakes cancelled, which is why the port
-has never actually collided with a wall, and why every ramp in it is inside out
-in a way no driving test can see - the collider and the height function share
-the source.  Correcting the sign has to come with the barrier placement and the
-AI checked against real walls, in one change.
+`scene::surface_height` used to read `-z * 14`, copying the MIDlet's formula
+raw.  The MIDlet's `a` negates the third component of every collision triangle
+(three `fneg`s in its constructor) because its own world has Z pointing down,
+so `-z * 14` is a height in *that* world - and this port maps that world to
+Y-up, in `game_to_world`, which negates the axis once more.  The port's height
+is therefore `+z * 14`.  With the old sign every nonzero height was mirrored
+about the road plane: the `h1` ramp's visual top sits at +4.2 while the sampler
+reported -4.2, kerb visuals run 0..+1.4 above the road, and the `vl` dip's
+visuals run -0.69..0.03 - so cars drove underneath elevated track and sank into
+kerbs.  The barriers place themselves with `height_at` too, so they stand on
+the true surface with the fix; the AI never read heights directly.
 
 ## Not implemented
 
