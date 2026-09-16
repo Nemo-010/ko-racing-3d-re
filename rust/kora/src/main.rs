@@ -523,11 +523,17 @@ fn draw_showroom(geometry: &scene::CarGeometry, texture: &Option<Texture2D>, deg
         return;
     }
 
+    // The MIDlet's own preview is a low, near-level three-quarter view: `bd`
+    // draws the car through `postTranslate(0, -0.55, -1.9)` with 180 degrees
+    // about Y, 90 about X and 125 about Z - a car seen from its own height, not
+    // from above.  Looking down on it, as this did, shows the far pair of
+    // wheels through the open wheel arches, which reads as a car with too many
+    // wheels when the original is showing two.
     let angle = degrees.to_radians();
-    let distance = 2.6;
+    let distance = 2.4;
     let mut camera = Camera3D::default();
-    camera.position = vec3(distance * angle.sin(), 1.35, distance * angle.cos());
-    camera.target = vec3(0.0, 0.15, 0.0);
+    camera.position = vec3(distance * angle.sin(), 0.62, distance * angle.cos());
+    camera.target = vec3(0.0, 0.22, 0.0);
     camera.up = vec3(0.0, 1.0, 0.0);
     camera.fovy = 45f32.to_radians();
     camera.aspect = Some(width / height);
