@@ -216,19 +216,20 @@ cargo test --release    # headless checks: archive, all 40 tracks, physics
 Implemented: resource-archive reader; all format parsers (mesh, `.tl`,
 `.map`, `.car`, `.ob`, `.hd`, `.md`, `.tab`/font); track baking into
 per-texture meshes; a road graph built from the tiles' drivable-side flags;
-a rapier collision world with one flat quad per road cell and barriers on
-closed sides; a rapier raycast vehicle for the player plus AI opponents that
-follow the road; lap, checkpoint and timing rules with a live HUD drawn in
-the game's own bitmap font.  `cargo test --release` runs 11 headless checks,
-including building all 40 tracks and driving AI round three of them.
+a collision world taken from each tile's collision mesh, so ramps and
+platforms are real; a rapier raycast vehicle for the player plus AI opponents
+that follow the road; lap, checkpoint and timing rules; and menus - main menu,
+career event list, quick race, car selection with stat bars, pause and results
+- with medals and career points saved between runs.  `cargo test --release`
+runs 19 headless checks, including building all 40 tracks, driving AI round
+four of them, a whole race run to the flag and scored, and the medal rules.
 
-Not implemented: menus, career/progression, audio and the
-Bluetooth/Vserv/SMS code paths.  See
+Not implemented: audio, the Bluetooth/Vserv/SMS code paths, the garage's car
+upgrades and the original's menu artwork.  See
 [`rust/kora/README.md`](rust/kora/README.md).
 
 ## Suggested next steps
 
-1. Menus and car selection, then the career loop over `campaign.000`:
-   progression, medals and unlock thresholds (all already decoded).
+1. The garage: car upgrades and the deluxe campaign's extra levels.
 4. Repack support: the pack format is simple enough to write, enabling
    asset swaps or a JAR rebuild.

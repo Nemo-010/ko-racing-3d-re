@@ -17,20 +17,22 @@ game's authors.  Fetch it first with the repository's setup script:
 ```sh
 ../../setup.sh                           # downloads the JAR, fills assets/
 cd rust/kora
-cargo run --release                      # race levels/1.map in cars/rally.car
+cargo run --release                      # main menu
 cargo test --release                     # headless checks
 ```
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `KORA_ASSETS` | `assets` | directory holding `data`, `data.*` and `lists/` |
-| `KORA_MAP` | `1.map` | track to load (`levels/*.map`) |
-| `KORA_CAR` | `cars/rally.car` | car descriptor to drive |
-| `KORA_LAPS` | campaign, else `3` | laps in the race |
-| `KORA_OPPONENTS` | campaign, else `3` | number of AI cars (0-7) |
+| `KORA_SAVE` | `kora-save.txt` | where career points and medals are kept |
+| `KORA_SKIP_MENU` | unset | set to boot straight into a race |
+| `KORA_MAP` | `1.map` | track for `KORA_SKIP_MENU` (any of the 40) |
+| `KORA_CAR` | `cars/rally.car` | car to select at startup |
+| `KORA_LAPS` | campaign, else `3` | overrides the race length |
+| `KORA_OPPONENTS` | campaign, else `3` | overrides the size of the grid |
 
-Controls: **arrows** or **WASD** to drive, **space** handbrake, **R** restart,
-**Esc** quit.
+Controls: **arrows** or **WASD** to drive, **space** handbrake, **Esc** pause,
+and in the menus arrows move, **Enter** confirms and **Esc** goes back.
 
 ## What is implemented
 
@@ -70,6 +72,15 @@ Controls: **arrows** or **WASD** to drive, **space** handbrake, **R** restart,
   lifted back onto the road surface when they sink below it (`World::lift_to`),
   which is what the MIDlet does every frame and what lets a car cross the steps
   between two tiles instead of being trapped by them.
+* **Menus** (`menu`) - main menu, the career event list, a quick-race list of
+  all 40 tracks, car selection with each car's four stat bars, a pause menu and
+  a results panel, all drawn with the game's own bitmap font.  Locked events
+  grey out and show the points they need.
+* **Career progress** (`progress`) - medals and points.  A race's entry
+  threshold and award come from its `.000` record, the medal from the finishing
+  position (gold, silver, bronze), and a better medal on a race already won
+  only pays the difference so a race cannot be farmed.  Points and the chosen
+  car are saved to `KORA_SAVE`.
 * **HUD** (`text`) - lap, position, total time, current and best lap, drawn
   with the game's own bitmap font (`/fonts/font` + `font.tab` + `font.png`).
 
@@ -77,6 +88,8 @@ Controls: **arrows** or **WASD** to drive, **space** handbrake, **R** restart,
 
 ```
 src/pack.rs      resource archive reader
+src/progress.rs  medals, points, car list and the save file
+src/menu.rs      every screen outside the race
 src/format.rs    per-format parsers
 src/grid.rs      road graph, race direction, starting grid
 src/campaign.rs  career tables -> laps/opponents/theme for a track
@@ -114,6 +127,9 @@ macroquad context.
 | `campaign_themes_still_build` | building a track in theme 3 produces the same collider |
 | `collision_meshes_give_tracks_elevation` | ramps and platforms reach the collider, and the collider matches the runtime height function |
 | `cars_climb_the_track_elevation` | AI cars drive down 1.map's 4.2-unit ramp and back out |
+| `medals_and_points_persist` | medal rules, points only for an improvement, save/load |
+| `career_and_quick_lists_are_built` | the 47 career events, the 40 quick-race tracks and the 8 cars |
+| `a_race_runs_to_the_flag_and_scores` | a whole 2-lap race with four AI cars, scored as the results screen does |
 
 ## Coordinate conventions
 
@@ -157,9 +173,13 @@ as-is.
 
 ## Not implemented
 
-* menus, car selection and the garage; the `.bck` backgrounds;
-* unlock progression, medals and the campaign menus, even though the tables
-  are decoded: the port reads a track's race setup but never saves progress;
+* the mid-race HUD of the original (its rival-position arrows, speedometer and
+  minimap) and the garage's car upgrades; the `.bck` backgrounds;
+* the original's own menu art and text, which live in packed images and text
+  blobs - the port draws its screens from the tables instead;
+* the exact original medal rule: the tables give each race an entry threshold
+  and an award, but what *performance* earns the medal is not in them, so the
+  port uses the finishing position;
 * audio (the referenced `.amr` clips are not shipped in the pack at all) and
   the Bluetooth/Vserv/SMS code paths;
 

@@ -690,3 +690,177 @@ fn cars_climb_the_track_elevation() {
         "the cars never went down the ramp (lowest {lowest:.2})"
     );
 }
+
+/// Medals and points: a better result pays the difference, a worse one pays
+/// nothing and never downgrades, and both survive a save.
+#[test]
+fn medals_and_points_persist() {
+    use kora::progress::Progress;
+    let mut progress = Progress::default();
+    assert!(progress.open(1), "the first race is open at zero points");
+    assert!(!progress.open(9), "a 9-point race is not");
+
+    let (medal, gained) = progress.record("career:0:0", 1, 1);
+    assert_eq!((medal, gained), (2, 2), "second place is silver, worth two");
+
+    let (medal, gained) = progress.record("career:0:0", 2, 1);
+    assert_eq!((medal, gained), (1, 0), "a worse finish pays nothing");
+    let (medal, gained) = progress.record("career:0:0", 5, 1);
+    assert_eq!((medal, gained), (0, 0), "off the podium wins no medal");
+    assert_eq!(progress.best("career:0:0"), 2, "and keeps the better medal");
+
+    let (medal, gained) = progress.record("career:0:0", 0, 1);
+    assert_eq!((medal, gained), (3, 1), "gold only pays the difference");
+    assert_eq!(progress.points, 3);
+
+    let path = std::env::temp_dir().join("kora-progress-test.txt");
+    progress.car = 2;
+    progress.save(&path);
+    let loaded = Progress::load(&path);
+    assert_eq!(loaded.points, 3);
+    assert_eq!(loaded.car, 2);
+    assert_eq!(loaded.best("career:0:0"), 3);
+    assert!(loaded.open(4) && !loaded.open(5));
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The career list comes from the two `.000` tables, and the quick-race list
+/// covers every track in the pack.
+#[test]
+fn career_and_quick_lists_are_built() {
+    use kora::campaign;
+    use kora::progress;
+    let resources = pack::load(&assets());
+
+    let events = campaign::events(&resources);
+    assert_eq!(events.len(), 47, "34 career records plus 13 deluxe");
+    assert_eq!(
+        events.iter().filter(|e| e.table == "campaign/campaign").count(),
+        34
+    );
+    assert_eq!(events[0].name, "TIMBERTON");
+    assert_eq!(events[0].map, "ma1.map");
+    assert_eq!(events[0].mode, 0);
+    assert!(
+        events.iter().all(|e| e.laps >= 1 && e.award >= 1 && e.key.contains(':')),
+        "every event needs laps, an award and a save key"
+    );
+    // Within a level, races come before time trials.
+    let mut time_trials = std::collections::HashSet::new();
+    for event in &events {
+        let level = (event.table.clone(), event.level_index);
+        if kora::format::RaceConfig::RACE_MODES.contains(&event.mode) {
+            assert!(
+                !time_trials.contains(&level),
+                "{} lists a race after a time trial",
+                event.name
+            );
+        } else {
+            time_trials.insert(level);
+        }
+    }
+
+    let quick = campaign::quick_events(&resources);
+    assert_eq!(quick.len(), 40, "every shipped track");
+    assert!(quick.iter().all(|e| e.threshold == 0 && e.laps >= 1));
+    assert!(quick.iter().any(|e| e.map == "1.map"));
+
+    let cars = progress::car_infos(&resources);
+    assert_eq!(cars.len(), 8, "ba.a lists eight cars");
+    assert!(cars.iter().all(|car| !car.name.is_empty()));
+    assert!(
+        cars.iter().all(|car| car.stats.iter().all(|value| *value <= 6)),
+        "stat bars draw up to six segments"
+    );
+    assert!(cars.iter().any(|car| car.file == "rally.car"));
+}
+
+/// Run a whole race to the flag with every car on AI, then score it the way
+/// the results screen does: position, medal, points and a saved total.
+#[test]
+fn a_race_runs_to_the_flag_and_scores() {
+    use kora::ai::AiDriver;
+    use kora::physics::{CarControl, World};
+    use kora::progress::{medal_for_place, Progress};
+    use kora::race::Race;
+
+    let dir = assets();
+    let resources = pack::load(&dir);
+    let car = format::Car::parse(&resources["cars/rally.car"]).unwrap();
+    let geometry = scene::build_car(&resources, &car).unwrap();
+
+    let track = scene::build(&dir, &resources, "1.map");
+    let scene::Track {
+        grid,
+        surface,
+        collision_vertices,
+        collision_indices,
+        walls,
+        ..
+    } = track;
+    let mut world = World::new(collision_vertices, collision_indices, &walls);
+    for &(spot, yaw) in grid.grid_slots(4).iter() {
+        world.add_car(spot, yaw, geometry.half_extents);
+    }
+    let cars = world.cars.len();
+    let laps = 2;
+    let mut races: Vec<Race> = (0..cars).map(|i| Race::new(&grid, laps, world.position(i), 0.0)).collect();
+    let mut drivers: Vec<AiDriver> = (0..cars).map(|_| AiDriver::new(1.0)).collect();
+    let ride = geometry.half_extents.y + 0.02;
+    let mut finish_order: Vec<usize> = Vec::new();
+
+    for step in 0..(150 * 60) {
+        let mut controls = vec![CarControl::default(); cars];
+        for index in 0..cars {
+            let (position, rotation) = world.pose(index);
+            let heading = rotation * vec3(0.0, 0.0, -1.0);
+            controls[index] =
+                drivers[index].control(&grid, position, heading, world.speed(index), 1.0 / 60.0);
+        }
+        world.step(1.0 / 60.0, &controls);
+        for index in 0..cars {
+            let place = world.position(index);
+            if let Some(height) = surface.height_at(place) {
+                world.lift_to(index, height + ride);
+            }
+        }
+        let now = step as f64 / 60.0;
+        for index in 0..cars {
+            let before = races[index].finished;
+            races[index].update(now, &grid, world.position(index));
+            if races[index].finished && !before {
+                finish_order.push(index);
+            }
+        }
+        if finish_order.len() == cars {
+            break;
+        }
+    }
+
+    assert_eq!(
+        finish_order.len(),
+        cars,
+        "only {} of {cars} cars finished a {laps}-lap race of 1.map",
+        finish_order.len()
+    );
+
+    // Score the winner exactly as the results screen does.
+    let winner = finish_order[0];
+    let place = finish_order.iter().position(|&car| car == winner).unwrap();
+    let mut progress = Progress::default();
+    let (medal, gained) = progress.record("quick:1.map:0", place, 1);
+    assert_eq!(place, 0);
+    assert_eq!(medal, medal_for_place(0));
+    assert_eq!(medal, 3, "the winner takes gold");
+    assert_eq!(gained, 3);
+    assert_eq!(progress.points, 3);
+    let race = &races[winner];
+    assert!(race.best.is_some() && race.best.unwrap() > 5.0, "laps are timed");
+    assert!(race.finish_time.is_some());
+    // And the order is a permutation of the grid.
+    assert_eq!(finish_order.len(), cars);
+    let mut sorted = finish_order.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), cars);
+}

@@ -82,3 +82,120 @@ pub fn race_for(resources: &Resources, map_name: &str) -> Option<RaceSetup> {
     }
     None
 }
+
+/// One selectable race: a campaign record plus its decoded setup.
+#[derive(Clone)]
+pub struct RaceEvent {
+    pub table: String,
+    pub level_index: usize,
+    pub name: String,
+    pub map: String,
+    pub mode: u8,
+    pub laps: u32,
+    pub opponents: u32,
+    pub theme: u8,
+    pub threshold: i32,
+    pub award: i32,
+    /// Stable key for saving a medal against this race.
+    pub key: String,
+}
+
+impl RaceEvent {
+    fn build(table: &str, level_index: usize, name: &str, map: &str, record: &crate::format::RaceRecord, config: RaceConfig) -> RaceEvent {
+        RaceEvent {
+            table: table.to_string(),
+            level_index,
+            name: name.to_string(),
+            map: map.to_string(),
+            mode: record.mode,
+            laps: config.laps,
+            opponents: if config.is_race() { config.opponents } else { 3 },
+            theme: config.theme,
+            threshold: record.values[0],
+            award: record.values[1].max(1),
+            key: format!("{table}:{level_index}:{}", record.mode),
+        }
+    }
+}
+
+/// Every race in both career tables, in table order, races before time trials.
+pub fn events(resources: &Resources) -> Vec<RaceEvent> {
+    let mut events = Vec::new();
+    for (table, campaign) in load(resources) {
+        let Some(blob) = resources.get(&format!("{table}.001")) else {
+            continue;
+        };
+        for (level_index, level) in campaign.levels.iter().enumerate() {
+            let mut records: Vec<_> = campaign
+                .records
+                .iter()
+                .filter(|record| record.level as usize == level_index)
+                .collect();
+            records.sort_by_key(|record| {
+                let is_race = RaceConfig::RACE_MODES.contains(&record.mode);
+                (!is_race, record.mode)
+            });
+            for record in records {
+                let offset = record.values[2].max(0) as usize;
+                let Some(config) = RaceConfig::parse(blob, offset, record.mode) else {
+                    continue;
+                };
+                events.push(RaceEvent::build(
+                    &table,
+                    level_index,
+                    &level.name,
+                    &level.map,
+                    record,
+                    config,
+                ));
+            }
+        }
+    }
+    events
+}
+
+/// Every track in the pack, for a quick race: the campaign setup where the
+/// track has one, otherwise three laps against three opponents.
+pub fn quick_events(resources: &Resources) -> Vec<RaceEvent> {
+    let mut maps: Vec<String> = resources
+        .keys()
+        .filter(|name| name.starts_with("levels/") && name.ends_with(".map"))
+        .map(|name| name.trim_start_matches("levels/").to_string())
+        .collect();
+    maps.sort();
+
+    maps.into_iter()
+        .map(|map| {
+            let setup = race_for(resources, &map);
+            let (laps, opponents, theme, mode) = match &setup {
+                Some(setup) => (
+                    setup.config.laps,
+                    if setup.config.is_race() {
+                        setup.config.opponents
+                    } else {
+                        3
+                    },
+                    setup.config.theme,
+                    setup.config.mode,
+                ),
+                None => (3, 3, 0, 0),
+            };
+            RaceEvent {
+                table: setup
+                    .as_ref()
+                    .map(|setup| setup.table.clone())
+                    .unwrap_or_default(),
+                level_index: setup.as_ref().map(|setup| setup.level_index).unwrap_or(0),
+                name: map.trim_end_matches(".map").to_uppercase(),
+                key: format!("quick:{map}:{mode}"),
+                map,
+                mode,
+                laps,
+                opponents,
+                theme,
+                threshold: 0,
+                award: 1,
+            }
+        })
+        .collect()
+}

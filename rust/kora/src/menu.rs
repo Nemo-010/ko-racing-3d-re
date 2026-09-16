@@ -1,0 +1,241 @@
+//! Screens: the main menu, the career and quick-race lists, car selection, the
+//! pause menu and the results panel.
+//!
+//! These are the port's own layout - the MIDlet draws its menus from packed
+//! images and text blobs - but every number on them comes from the game's
+//! tables: the campaign's levels, entry thresholds and awards, and each car's
+//! four stat values from its `.car` file.
+
+use macroquad::prelude::*;
+
+use crate::campaign::RaceEvent;
+use crate::progress::{medal_name, CarInfo, Progress};
+use crate::text::GameFont;
+
+pub const BACKDROP: Color = Color::new(0.05, 0.07, 0.12, 1.0);
+const PANEL: Color = Color::new(1.0, 1.0, 1.0, 0.06);
+const HIGHLIGHT: Color = Color::new(0.20, 0.45, 0.85, 0.85);
+const LOCKED: Color = Color::new(0.45, 0.45, 0.50, 1.0);
+const ACCENT: Color = Color::new(1.0, 0.85, 0.2, 1.0);
+const GOLD: Color = Color::new(1.0, 0.82, 0.25, 1.0);
+const SILVER: Color = Color::new(0.80, 0.82, 0.86, 1.0);
+const BRONZE: Color = Color::new(0.80, 0.55, 0.30, 1.0);
+
+fn medal_color(medal: u8) -> Color {
+    match medal {
+        3 => GOLD,
+        2 => SILVER,
+        1 => BRONZE,
+        _ => LOCKED,
+    }
+}
+
+/// A panel behind a menu so the text stays readable over the sky.
+fn panel(rect: Rect) {
+    draw_rectangle(rect.x, rect.y, rect.w, rect.h, PANEL);
+    draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, Color::new(1.0, 1.0, 1.0, 0.15));
+}
+
+fn centred(font: &GameFont, text: &str, y: f32, scale: f32, color: Color) {
+    let width = font.width(text, scale);
+    font.draw_shadow(text, (screen_width() - width) / 2.0, y, scale, color);
+}
+
+pub fn draw_main(font: &GameFont, progress: &Progress, cursor: usize) {
+    centred(font, "K.O. RACING 3D", screen_height() * 0.16, 4.0, WHITE);
+    centred(font, "RUST PORT", screen_height() * 0.16 + 46.0, 1.6, ACCENT);
+    centred(
+        font,
+        &format!("CAREER POINTS {}", progress.points),
+        screen_height() * 0.16 + 78.0,
+        1.4,
+        LOCKED,
+    );
+
+    let items = ["CAREER", "QUICK RACE", "SELECT CAR", "QUIT"];
+    let row = 34.0;
+    let top = screen_height() * 0.42;
+    let width = 240.0;
+    let left = (screen_width() - width) / 2.0;
+    panel(Rect::new(left - 12.0, top - 14.0, width + 24.0, items.len() as f32 * row + 20.0));
+    for (index, item) in items.iter().enumerate() {
+        let y = top + index as f32 * row;
+        if index == cursor {
+            draw_rectangle(left - 6.0, y - 4.0, width + 12.0, row - 4.0, HIGHLIGHT);
+        }
+        font.draw_shadow(item, left + 16.0, y, 1.8, WHITE);
+    }
+    centred(
+        font,
+        "ARROWS SELECT   ENTER CONFIRM   ESC BACK",
+        screen_height() - 22.0,
+        1.3,
+        LOCKED,
+    );
+}
+
+/// A scrolling list of races, showing the medal already won and greying out
+/// the ones the player's points have not reached.
+pub fn draw_events(
+    font: &GameFont,
+    progress: &Progress,
+    events: &[RaceEvent],
+    cursor: usize,
+    title: &str,
+) {
+    centred(font, title, 14.0, 2.4, WHITE);
+    let row = 26.0;
+    let top = 56.0;
+    let visible = ((screen_height() - top - 40.0) / row) as usize;
+    let first = cursor.saturating_sub(visible.saturating_sub(1) / 2).min(events.len().saturating_sub(visible));
+
+    for (offset, event) in events.iter().skip(first).take(visible).enumerate() {
+        let index = first + offset;
+        let y = top + offset as f32 * row;
+        let open = progress.open(event.threshold);
+        if index == cursor {
+            draw_rectangle(24.0, y - 3.0, screen_width() - 48.0, row - 3.0, HIGHLIGHT);
+        }
+        let color = if open { WHITE } else { LOCKED };
+        font.draw_shadow(
+            &format!("{:<16}", event.name),
+            32.0,
+            y,
+            1.5,
+            color,
+        );
+        font.draw_shadow(&format!("{:<10}", event.map), 260.0, y, 1.5, color);
+        font.draw_shadow(&format!("{:<4}", event.laps), 430.0, y, 1.5, color);
+        font.draw_shadow(&format!("{:<3}", event.opponents), 480.0, y, 1.5, color);
+        if open {
+            let medal = progress.best(&event.key);
+            font.draw_shadow(medal_name(medal), 530.0, y, 1.5, medal_color(medal));
+        } else {
+            font.draw_shadow(
+                &format!("NEED {}", event.threshold),
+                530.0,
+                y,
+                1.5,
+                LOCKED,
+            );
+        }
+    }
+
+    font.draw_shadow("LAPS", 430.0, top - 20.0, 1.3, LOCKED);
+    font.draw_shadow("CPU", 480.0, top - 20.0, 1.3, LOCKED);
+    font.draw_shadow("MEDAL", 530.0, top - 20.0, 1.3, LOCKED);
+    font.draw_shadow(
+        &format!("{} of {} events   points {}", cursor.min(events.len().saturating_sub(1)) + 1, events.len(), progress.points),
+        32.0,
+        screen_height() - 22.0,
+        1.3,
+        LOCKED,
+    );
+}
+
+/// The four stat bars `ba.a(car, stat)` feeds the garage display.
+pub fn draw_cars(font: &GameFont, cars: &[CarInfo], progress: &Progress, cursor: usize) {
+    centred(font, "SELECT CAR", 14.0, 2.4, WHITE);
+    const LABELS: [&str; 4] = ["SPEED", "GRIP", "ACCEL", "WEIGHT"];
+    let row = 52.0;
+    let top = 60.0;
+    for (index, car) in cars.iter().enumerate() {
+        let y = top + index as f32 * row;
+        if index == cursor {
+            draw_rectangle(24.0, y - 6.0, screen_width() - 48.0, row - 8.0, HIGHLIGHT);
+        }
+        let selected = index == progress.car;
+        font.draw_shadow(
+            &format!("{:<14}", car.name),
+            32.0,
+            y,
+            1.7,
+            if selected { ACCENT } else { WHITE },
+        );
+        font.draw_shadow(&format!("{:<14}", car.file), 380.0, y, 1.2, LOCKED);
+        for (stat, value) in car.stats.iter().enumerate() {
+            let by = y + 16.0 + stat as f32 * 8.0;
+            font.draw_shadow(LABELS[stat], 380.0, by, 0.9, LOCKED);
+            for segment in 0..6 {
+                let x = 440.0 + segment as f32 * 12.0;
+                let on = segment < *value;
+                draw_rectangle(
+                    x,
+                    by + 1.0,
+                    9.0,
+                    6.0,
+                    if on { ACCENT } else { Color::new(1.0, 1.0, 1.0, 0.12) },
+                );
+            }
+        }
+    }
+    font.draw_shadow(
+        "ARROWS SELECT   ENTER CHOOSE   ESC BACK",
+        32.0,
+        screen_height() - 22.0,
+        1.3,
+        LOCKED,
+    );
+}
+
+pub fn draw_pause(font: &GameFont, cursor: usize) {
+    let items = ["RESUME", "RESTART", "QUIT TO MENU"];
+    let width = 260.0;
+    let left = (screen_width() - width) / 2.0;
+    let top = screen_height() * 0.4;
+    panel(Rect::new(left - 12.0, top - 30.0, width + 24.0, items.len() as f32 * 34.0 + 56.0));
+    centred(font, "PAUSED", top - 40.0, 2.4, WHITE);
+    for (index, item) in items.iter().enumerate() {
+        let y = top + index as f32 * 34.0;
+        if index == cursor {
+            draw_rectangle(left - 6.0, y - 4.0, width + 12.0, 30.0, HIGHLIGHT);
+        }
+        font.draw_shadow(item, left + 16.0, y, 1.8, WHITE);
+    }
+}
+
+#[derive(Clone)]
+pub struct Outcome {
+    pub place: usize,
+    pub medal: u8,
+    pub gained: u32,
+    pub total_time: f32,
+    pub best_lap: Option<f32>,
+    pub laps: u32,
+    pub cars: usize,
+}
+
+pub fn draw_results(font: &GameFont, event: &RaceEvent, progress: &Progress, outcome: &Outcome) {
+    let width = 460.0;
+    let left = (screen_width() - width) / 2.0;
+    let top = screen_height() * 0.22;
+    panel(Rect::new(left - 12.0, top - 46.0, width + 24.0, 300.0));
+    centred(font, &event.name, top - 56.0, 2.6, WHITE);
+
+    let line = |index: usize, label: &str, value: &str, color: Color| {
+        let y = top + index as f32 * 32.0;
+        font.draw_shadow(label, left + 20.0, y, 1.6, LOCKED);
+        font.draw_shadow(value, left + width - 20.0 - font.width(value, 1.6), y, 1.6, color);
+    };
+    line(0, "POSITION", &format!("{} of {}", outcome.place + 1, outcome.cars),
+         if outcome.place == 0 { GOLD } else { WHITE });
+    line(1, "LAPS", &format!("{}", outcome.laps), WHITE);
+    line(2, "TOTAL", &format_time(outcome.total_time), WHITE);
+    line(3, "BEST LAP", &outcome.best_lap.map(format_time).unwrap_or_else(|| "--:--".into()), ACCENT);
+    line(4, "MEDAL", medal_name(outcome.medal), medal_color(outcome.medal));
+    line(5, "POINTS", &format!("+{}  (total {})", outcome.gained, progress.points), ACCENT);
+
+    centred(
+        font,
+        "ENTER CONTINUE",
+        top + 220.0,
+        1.5,
+        LOCKED,
+    );
+}
+
+pub fn format_time(seconds: f32) -> String {
+    let minutes = (seconds / 60.0) as u32;
+    let rest = seconds - minutes as f32 * 60.0;
+    format!("{minutes}:{rest:05.2}")
+}
