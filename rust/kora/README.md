@@ -282,6 +282,12 @@ grey and four in gold, with the chosen one pulsing through its sizes, which is
 the animation `u.d` runs.  A marker is a level with at least one race starting
 from it, and choosing one lists those races in a panel beside it.
 
+The map is drawn whole, at the largest size that fits, so it keeps its own
+aspect and the whole layout stays visible.  `u` gets that for free on a phone -
+its canvas is smaller than the 350-pixel picture, so the MIDlet draws it at one
+to one and pans - but a desktop window is larger than the map, and filling the
+window would crop it and stretch the layout the markers are placed on.
+
 Where the markers come from is worth spelling out, because it is spread across
 two tables: the campaign `.000` lists the *levels* (name, track, the flag the
 file carries, and the marker's x and y **in map pixels**), and each race record

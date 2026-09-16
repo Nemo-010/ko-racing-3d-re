@@ -249,23 +249,34 @@ impl MapScreen {
         (100 * done / total) as u32
     }
 
-    /// The map is drawn at the largest zoom that still covers the screen, so a
-    /// small map fills it and a big one pans.
+    /// The whole picture, at the largest size that fits, so the map keeps its
+    /// own aspect and the whole of it stays visible.  `u` gets this for free on
+    /// a phone - its canvas is smaller than the 350-pixel map, so it draws it at
+    /// one to one and pans - but a desktop window is larger than the map, and
+    /// stretching it to cover the window would both crop and distort the layout
+    /// the markers are placed on.
     fn zoom(&self) -> f32 {
-        (screen_width() / self.image.width()).max(screen_height() / self.image.height())
+        (screen_width() / self.image.width()).min(screen_height() / self.image.height())
     }
 
-    /// `u.c(int, int)`: scroll so that the chosen marker is on screen.
+    /// `u.c(int, int)`: put the map where the chosen marker can be seen.  When
+    /// the whole map fits, that is the middle of the screen; when it does not,
+    /// it pans, clamped so no gap opens at an edge.
     fn centre_on(&self, cursor: usize) -> Vec2 {
         let zoom = self.zoom();
         let marker = self.levels[cursor].position * zoom;
         let wanted = vec2(screen_width(), screen_height()) / 2.0 - marker;
         let map = vec2(self.image.width(), self.image.height()) * zoom;
-        // Clamp so the map never leaves a gap at an edge, unless it is smaller
-        // than the screen, in which case it is centred.
+        let axis = |want: f32, map: f32, screen: f32| {
+            if map <= screen {
+                (screen - map) / 2.0
+            } else {
+                want.clamp(screen - map, 0.0)
+            }
+        };
         vec2(
-            wanted.x.clamp((screen_width() - map.x).min(0.0), 0.0),
-            wanted.y.clamp((screen_height() - map.y).min(0.0), 0.0),
+            axis(wanted.x, map.x, screen_width()),
+            axis(wanted.y, map.y, screen_height()),
         )
     }
 
