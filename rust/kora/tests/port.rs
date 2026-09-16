@@ -1782,3 +1782,41 @@ fn file_locations_follow_each_platforms_rules() {
         "a host cannot work out an Android package's private directory"
     );
 }
+
+/// The way the README says to run it from the repository root, with the
+/// manifest path, so `assets` resolves to the tree the tools share.  That tree
+/// still holds tool output - the extraction manifest and the Wavefront files -
+/// which the loader has to leave alone.
+#[test]
+fn the_repository_root_tree_loads() {
+    use std::path::PathBuf;
+    let tree = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+    if !tree.is_dir() {
+        eprintln!("skipping: {} is not there (run ./setup.sh)", tree.display());
+        return;
+    }
+
+    let resources = pack::load(&tree);
+    assert!(resources.len() >= 668, "{} resources", resources.len());
+    for required in [
+        "levels/1.map",
+        "cars/rally.car",
+        "tiles/s.tl",
+        "tex/texpack.png",
+        "lists/tile_list",
+        "ui/ui.txt",
+        "sounds/theme.mid",
+    ] {
+        assert!(
+            resources.contains_key(required),
+            "{required} is missing from the tree at the repository root"
+        );
+    }
+
+    // Tool output sits in the same directory and is not a resource.
+    assert!(!resources.contains_key("MANIFEST.tsv"));
+    assert!(
+        !resources.keys().any(|name| name.ends_with(".obj")),
+        "the Wavefront files were loaded as resources"
+    );
+}
