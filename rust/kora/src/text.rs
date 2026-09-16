@@ -15,28 +15,28 @@
 //! cannot be used at runtime: macroquad's `Font` is fontdue-based and takes
 //! TrueType outlines, so a texture atlas has no route in.
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use macroquad::prelude::*;
 use macroquad::text::TextParams;
 
 const FONT_BYTES: &[u8] = include_bytes!("../fonts/ContrailOne-Regular.ttf");
 
-static LOADED: OnceLock<Font> = OnceLock::new();
-
-/// Load the bundled face.  Rasterising needs a live window, so call this once
-/// from `main`; until it runs, or if it fails, macroquad's default is used.
-pub fn init() {
+/// Loaded on first use, which is always inside the frame loop and therefore
+/// after the window exists - rasterising a glyph needs a live graphics context.
+/// `None` falls back to macroquad's default face.
+static FONT: LazyLock<Option<Font>> = LazyLock::new(|| {
     match load_ttf_font_from_bytes(FONT_BYTES) {
-        Ok(font) => {
-            let _ = LOADED.set(font);
+        Ok(font) => Some(font),
+        Err(error) => {
+            eprintln!("could not load the bundled font, falling back: {error}");
+            None
         }
-        Err(error) => eprintln!("could not load the bundled font, falling back: {error}"),
     }
-}
+});
 
 fn face() -> Option<&'static Font> {
-    LOADED.get()
+    FONT.as_ref()
 }
 
 /// Draw `label` with its top-left at `(x, y)`, returning its width.
